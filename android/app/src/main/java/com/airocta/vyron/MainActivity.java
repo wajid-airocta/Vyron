@@ -27,7 +27,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
-import java.net.HttpsURLConnection;
+import javax.net.ssl.HttpsURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
