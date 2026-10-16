@@ -6,7 +6,7 @@ VYRON is a desktop build of the [Mark LV](https://github.com/FatihMakes/Mark-LV)
 
 - **Mac (Apple silicon):** Use the locally built `installers/Vyron-macOS-arm64.dmg`, or build it with `scripts/build_macos.sh`. Open the DMG and drag `Vyron.app` to Applications. The app uses bundle ID `com.airocta.vyron`.
 - **Windows (x64):** Download `Vyron-Windows-x64-Setup.exe` from the latest successful **Build VYRON for Windows** GitHub Actions run, or run the workflow manually. The installer adds a Start Menu shortcut and an uninstaller.
-- Each device needs its own Gemini API key. Enter it on first launch. The installer contains no API key, private certificate, or personal memory.
+- Each Mac or Windows desktop installation needs its own Gemini API key. The Android phone uses its paired Mac key by default, or an optional encrypted override entered on the phone. Installers contain no Gemini API key, private certificate, or personal memory.
 - On Mac, allow VYRON under **System Settings → Privacy & Security** for Microphone, Accessibility, Screen & System Audio Recording, and Full Disk Access if you want unrestricted file operations. These permissions apply to `Vyron.app`; grants to a Python interpreter do not transfer.
 - Packaged settings live in `~/Library/Application Support/Vyron` on macOS and `%APPDATA%\Vyron` on Windows. Put custom plugin `.py` files in that folder's `plugins` subdirectory.
 
