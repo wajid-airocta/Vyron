@@ -133,11 +133,12 @@
     #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
   </style>
   <link rel="stylesheet" href="/static/ui_upgrade.css">
+  <link rel="stylesheet" href="/static/vyron_hud.css">
 </head>
 <body class="dashboard-page">
   <div id="toast"></div>
   <header>
-    <div class="logo"><em>J</em>ARVIS</div>
+    <div class="logo"><em>V</em>YRON</div>
     <div class="pill" id="pill"><span class="dot"></span><span id="st">Connecting</span></div>
     <div class="enc-badge" id="enc">AES-256</div>
     <div class="spacer"></div>
@@ -379,6 +380,10 @@
       if (!txt) return;
       inp.value = '';
       append('user', txt);
+      if (window.VyronAndroid && window.VyronAndroid.hasOverride()) {
+        window.VyronAndroid.sendOverride(txt);
+        return;
+      }
       const enc  = _encrypt(txt);
       const body = enc ? { enc } : { text: txt };
       _authFetch('/api/command', {
@@ -387,6 +392,10 @@
         body: JSON.stringify(body)
       });
     }
+
+    window.vyronOverrideResult = function (answer) {
+      append('jarvis', answer || 'No response received.');
+    };
 
     function doWake() {
       sys('Sending wake signal…');
@@ -556,5 +565,6 @@
       _micIdle();
     }
   </script>
+  <script src="/static/vyron_hud.js"></script>
 </body>
 </html>

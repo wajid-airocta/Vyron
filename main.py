@@ -23,6 +23,9 @@ if _platform.system() == "Windows":
 # down on startup. Reconfiguring to UTF-8 with a replacement fallback costs
 # nothing and makes the app launch the same way in every locale.
 import sys as _sys
+import os as _os
+if getattr(_sys, "frozen", False) and _sys.platform != "win32":
+    _os.umask(0o077)
 
 for _stream in ("stdout", "stderr"):
     try:

@@ -1,0 +1,66 @@
+/* VYRON reference-inspired command deck. All values are live or explicitly unavailable. */
+:root{--vy-bg:#030608;--vy-steel:#1c2930;--vy-line:#4a6a76;--vy-cyan:#83dce8;--vy-red:#bf2634;--vy-text:#d5e4e8;--vy-muted:#8ca6af}
+.dashboard-page{display:flex;flex-direction:column;min-height:100dvh;overflow:hidden;background:radial-gradient(circle at 50% 38%,#122027 0,#05090d 42%,#010304 90%);color:var(--vy-text);font-family:Rajdhani,Eurostile,'Arial Narrow',system-ui,sans-serif;letter-spacing:.025em}
+.dashboard-page:before{content:'';pointer-events:none;position:fixed;inset:0;opacity:.18;background-image:linear-gradient(#74939b20 1px,transparent 1px),linear-gradient(90deg,#74939b20 1px,transparent 1px);background-size:24px 24px;mask-image:radial-gradient(ellipse at center,#000,transparent 75%)}
+.dashboard-page header{height:60px;flex:none;background:linear-gradient(180deg,#26333a,#060b0e 65%);border-bottom:1px solid var(--vy-line);clip-path:polygon(0 0,100% 0,100% 88%,92% 88%,90% 100%,10% 100%,8% 88%,0 88%);padding:7px 18px;z-index:2}
+.dashboard-page header .logo{color:#f1f8f9;font-size:20px;font-weight:900;letter-spacing:.24em;text-shadow:0 0 14px #58d2e077}
+.dashboard-page header .logo em{color:var(--vy-cyan)}
+.dashboard-page .pill{border-color:#507484;background:#061219;color:var(--vy-muted)}
+.dashboard-page .pill.on{border-color:#5cbbbf;color:var(--vy-cyan);background:#103036}
+.dashboard-page .url{font-size:11px;border:0;background:none;color:var(--vy-muted)}
+.dashboard-page .enc-badge.on{border-color:#466975;color:var(--vy-cyan);background:#0d242b}
+.vy-stage{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;position:relative;padding:4px 14px 0;overflow:auto;z-index:1}
+.vy-stage::-webkit-scrollbar{width:3px}.vy-stage::-webkit-scrollbar-thumb{background:var(--vy-line)}
+.vy-topline{display:flex;justify-content:space-between;align-items:center;width:min(100%,650px);font-size:11px;color:var(--vy-muted);letter-spacing:.15em;margin:2px 0 6px}
+.vy-topline b{color:var(--vy-text);font-weight:700}
+.vy-panel-title{position:relative;color:#e3eef0;font-size:14px;font-weight:900;letter-spacing:.2em;text-align:center;margin:4px 0 7px;padding:5px 35px;border-top:1px solid #4b6970;border-bottom:1px solid #4b6970;background:linear-gradient(90deg,transparent,#26353d 45%,#26353d 55%,transparent)}
+.vy-panel-title:after{content:'';position:absolute;bottom:-5px;left:calc(50% - 8px);border:8px solid transparent;border-top-color:var(--vy-red)}
+.vy-hero{width:min(100%,520px);aspect-ratio:1;max-height:45dvh;min-height:250px;position:relative;display:grid;place-items:center;margin:auto 0 4px}
+.vy-side-actions{position:absolute;top:10%;bottom:10%;display:flex;flex-direction:column;justify-content:space-between;z-index:2}
+.vy-side-actions.left{left:0}.vy-side-actions.right{right:0}
+.vy-side-actions button{width:57px;height:57px;border:1px solid #5f7b87;clip-path:polygon(20% 0,80% 0,100% 20%,100% 80%,80% 100%,20% 100%,0 80%,0 20%);background:radial-gradient(circle,#1e3038,#060b0f 70%);color:var(--vy-cyan);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;box-shadow:inset 0 0 13px #69bac522;line-height:1.05;font-size:24px}
+.vy-side-actions small{font-size:9px;color:var(--vy-text);letter-spacing:.1em;margin-top:3px}
+.vy-reactor{width:min(84%,410px);aspect-ratio:1;border-radius:50%;position:relative;display:grid;place-items:center;background:radial-gradient(circle,#03070a 0 19%,#172630 29%,#020608 40%,#1c2b32 44%,#071014 48%,#030608 61%,#2c3b42 69%,#060b0e 73%);box-shadow:0 0 0 2px #3d515c,0 0 0 7px #070d11,0 0 0 9px #526774,0 0 45px #83dce820,inset 0 0 28px #000}
+.vy-reactor:before{content:'';position:absolute;inset:3%;border-radius:50%;background:repeating-conic-gradient(from 1deg,#81a8b7 0 .6deg,transparent .6deg 4deg);mask:radial-gradient(circle,transparent 0 71%,#000 72% 75%,transparent 76%);opacity:.8}
+.vy-reactor:after{content:'';position:absolute;inset:13%;border-radius:50%;border:2px dashed #567887;box-shadow:0 0 0 10px #0710169c,inset 0 0 22px #80cedc4d;animation:vy-spin 80s linear infinite}
+@keyframes vy-spin{to{transform:rotate(360deg)}}
+.vy-arc{position:absolute;inset:6%;border-radius:50%;border:4px solid transparent;border-top-color:#83dce8;border-bottom-color:#b42030;filter:drop-shadow(0 0 5px #66c4d1);animation:vy-spin 30s linear infinite}
+.vy-arc.inner{inset:24%;border-width:2px;border-top-color:#628f9a;border-bottom-color:#628f9a;animation-direction:reverse;animation-duration:38s}
+.vy-core{width:35%;aspect-ratio:1;border-radius:50%;z-index:1;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:radial-gradient(circle,#152630,#040a0e 64%);border:2px solid #7794a0;box-shadow:0 0 0 5px #03080c,0 0 0 7px #35505a,inset 0 0 18px #8dd7e033}
+.vy-core .value{font-size:clamp(20px,5vw,30px);line-height:1;color:#e1f6f8;font-weight:900;text-shadow:0 0 13px #a0e8f5}.vy-core .unit{font-size:13px;color:var(--vy-cyan)}.vy-core small{font-size:11px;color:var(--vy-muted);letter-spacing:.16em}
+.vy-orb{position:absolute;z-index:2;width:20%;aspect-ratio:1;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:radial-gradient(circle,#1a2d36,#02070a 71%);border:2px solid #597480;box-shadow:0 0 0 4px #03080b,0 0 0 6px #344c57,0 0 15px #7cbece55;color:#e6f1f2;font-weight:800;font-size:clamp(14px,4vw,23px);line-height:1}.vy-orb small{font-size:10px;letter-spacing:.12em;color:var(--vy-cyan)}
+.vy-orb.cpu{top:4%}.vy-orb.batt{bottom:4%}
+.vy-meters{display:flex;width:min(100%,500px);justify-content:space-around;font-size:11px;letter-spacing:.14em;color:var(--vy-muted);margin-bottom:5px}.vy-meters b{color:#d1eef1;font-size:13px}
+.vy-screen{width:min(100%,650px);min-height:0;flex:1;display:none;flex-direction:column;padding:12px 15px;border:1px solid #516c77;clip-path:polygon(7% 0,93% 0,100% 7%,100% 93%,93% 100%,7% 100%,0 93%,0 7%);background:linear-gradient(145deg,#101c23ef,#020609ee);box-shadow:inset 0 0 20px #68bec11e;margin:6px auto 12px;overflow:auto}.vy-screen.active{display:flex}.vy-screen h2{color:var(--vy-cyan);font-size:17px;letter-spacing:.2em;border-bottom:1px solid #45636f;padding-bottom:7px;margin:0 0 10px}.vy-screen p,.vy-screen li{color:var(--vy-text);font-size:14px;line-height:1.45}.vy-screen .sub{font-size:11px;color:var(--vy-muted);letter-spacing:.1em}.vy-screen button,.vy-screen input{font:inherit;border:1px solid #5a7c88;background:#0a1a21;color:#d9eef0;border-radius:3px;padding:9px;margin:4px;min-height:38px}.vy-screen button{cursor:pointer}.vy-screen button:hover{border-color:var(--vy-cyan);color:white}.vy-screen input{min-width:0}.vy-screen .row{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid #304751;padding:7px 0}.vy-screen .row strong{font-size:15px;color:#d7f1f3}.vy-screen .row small{font-size:11px;color:var(--vy-muted)}
+.vy-weather-number{font-size:58px!important;line-height:1;color:#e5f7f8!important;text-shadow:0 0 15px #8ed8df88}.vy-calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;text-align:center}.vy-calendar-grid span{padding:6px 1px;border:1px solid #28414b;font-size:12px}.vy-calendar-grid .today{border-color:var(--vy-cyan);color:var(--vy-cyan);background:#153039}
+.vy-nav{width:min(100%,650px);height:62px;flex:none;display:flex;align-items:center;justify-content:space-evenly;position:relative;z-index:2;background:linear-gradient(#19272f,#080d11);border:1px solid #526d76;clip-path:polygon(5% 0,95% 0,100% 30%,100% 100%,0 100%,0 30%);box-shadow:inset 0 2px #89c5cf38}.vy-nav button{height:48px;min-width:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;border:0;background:transparent;color:#97b8c1;cursor:pointer;font-size:21px}.vy-nav button small{font-size:9px;letter-spacing:.08em}.vy-nav button.active{color:#d9f8fa;text-shadow:0 0 10px #7ddce7}.vy-nav button:focus-visible{outline:2px solid white}
+.vy-finger{height:37px;flex:none;display:grid;place-items:center;width:80px;margin:3px auto;color:#b6dce2;font-size:29px;clip-path:polygon(16% 0,84% 0,100% 100%,0 100%);background:linear-gradient(#263b45,#071117);border-top:1px solid #7799a4;cursor:pointer}
+.vy-ticker{flex:none;width:min(100%,650px);height:54px;display:flex;align-items:center;justify-content:center;text-align:center;padding:6px 16px;color:#c1d6dc;background:linear-gradient(180deg,#273942,#070e12);border:1px solid #617c86;clip-path:polygon(5% 0,95% 0,100% 35%,100% 100%,0 100%,0 35%);font-size:12px;line-height:1.2;letter-spacing:.07em;z-index:2}
+.dashboard-page main#feed{display:none;max-height:30dvh;overflow:auto;width:min(100%,650px);flex:1;padding:8px}.dashboard-page main#feed.active{display:flex}.dashboard-page footer{flex:none;width:min(100%,650px);margin:0 auto;z-index:2;padding:7px;background:#080e12;border-color:#52707b}.dashboard-page footer #inp{font-size:13px;min-height:42px}.dashboard-page footer .btn,.dashboard-page footer .btn-attach,.dashboard-page footer #mic-btn{min-height:42px;border-radius:3px}.dashboard-page footer .btn-send{background:#244d58;color:#f4fcfc;border:1px solid #86afbb}
+@media (max-width:600px){.dashboard-page header{height:54px;flex-wrap:nowrap;padding:4px 10px}.dashboard-page header .url,.dashboard-page header .enc-badge{display:none}.dashboard-page header .logo{font-size:15px}.vy-stage{padding-inline:8px}.vy-hero{width:min(100%,410px);max-height:48dvh}.vy-side-actions button{width:47px;height:47px;font-size:20px}.vy-side-actions small{font-size:8px}.vy-nav{height:57px}.vy-nav button{min-width:46px;font-size:19px}.vy-screen{padding:12px}.dashboard-page footer{flex-wrap:nowrap}.dashboard-page footer #inp{flex:1 1 auto;min-width:70px}.dashboard-page footer .btn-send{flex:0 0 auto}.dashboard-page footer .btn-attach,.dashboard-page footer #mic-btn{min-width:40px;font-size:14px}}
+@media (max-height:720px){.vy-hero{max-height:43dvh;min-height:220px}.vy-topline{margin:0}.vy-panel-title{margin:0 0 4px}.vy-ticker{height:43px}.vy-nav{height:54px}}
+@media (max-width:819px){.vy-overview{display:none!important}}
+@media (min-width:820px){
+  .dashboard-page{min-width:800px}
+  .dashboard-page header{height:64px}
+  .vy-stage{display:grid;grid-template-columns:minmax(360px,1.1fr) minmax(340px,.9fr);grid-template-rows:auto auto minmax(0,1fr) auto;gap:6px 20px;align-items:stretch;padding:8px 24px;overflow:hidden;width:100%}
+  .vy-topline{grid-column:1/-1;width:100%;max-width:none;margin:0}
+  .vy-panel-title{grid-column:1/-1;margin:0;justify-self:center;min-width:230px}
+  .vy-hero{display:grid!important;grid-column:1;grid-row:3;justify-self:center;align-self:center;width:min(100%,63dvh,610px);max-height:none;min-height:0;margin:0}
+  .vy-meters{display:flex!important;grid-column:1;grid-row:4;width:100%;max-width:none;align-self:center;margin:0}
+  .vy-screen,.dashboard-page main#feed{grid-column:2;grid-row:3/5;width:100%;max-width:none;max-height:none;min-height:0;margin:0;padding:18px 22px;overflow:auto}
+  .vy-screen h2{font-size:20px}
+  .vy-screen p,.vy-screen li{font-size:16px}
+  .vy-overview.active{display:flex}
+  .vy-nav,.vy-ticker,.dashboard-page footer{width:100%;max-width:none}
+  .vy-nav{height:56px;justify-content:center;gap:min(4vw,52px)}
+  .vy-ticker{height:42px}
+  .vy-finger{height:35px}
+  .dashboard-page footer{padding:7px 24px}
+  .dashboard-page main#feed{padding:12px 16px}
+}
+.login-page{background:radial-gradient(circle at center,#142730,#03080b 68%)!important;color:#e0f2f4}
+.login-page .card{background:linear-gradient(145deg,#172a33,#040b0f)!important;border:1px solid #567986!important;box-shadow:0 0 0 5px #081116,0 0 45px #73c4d32b,inset 0 0 22px #77c8d11c!important;clip-path:polygon(8% 0,92% 0,100% 8%,100% 92%,92% 100%,8% 100%,0 92%,0 8%)}
+.login-page .logo{color:#e7f6f7!important;font-weight:900;letter-spacing:.25em}.login-page .logo em{color:#8bdce5!important}
+.login-page .btn{background:#235967!important;border:1px solid #79bdc9!important;border-radius:3px!important;color:#f5ffff!important}
+.login-page .key-input{background:#09171d!important;border:1px solid #66909a!important;color:#e9fafb!important;border-radius:3px!important}

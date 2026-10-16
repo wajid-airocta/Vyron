@@ -1,0 +1,10 @@
+<resources>
+    <style name="VyronTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#7ddde9</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#02070a</item>
+        <item name="android:navigationBarColor">#02070a</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

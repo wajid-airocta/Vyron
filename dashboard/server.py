@@ -45,8 +45,8 @@ MAX_UPLOAD_MB = 500
 def _make_uploads_dir() -> Path:
     """Return (and create) the cross-platform uploads folder."""
     for candidate in [
-        Path.home() / "Downloads" / "JARVIS Uploads",
-        Path.home() / "Documents" / "JARVIS Uploads",
+        Path.home() / "Downloads" / "VYRON Uploads",
+        Path.home() / "Documents" / "VYRON Uploads",
         BASE_DIR / "uploads",
     ]:
         try:
@@ -113,8 +113,8 @@ def _ensure_network_access(port: int) -> None:
     if sys.platform == "win32":
         import ctypes, time
 
-        port_rule = f"JARVIS Dashboard Port {port}"
-        prog_rule  = "JARVIS Dashboard Python"
+        port_rule = f"VYRON Dashboard Port {port}"
+        prog_rule  = "VYRON Dashboard App"
         py_exe     = sys.executable
 
         def _netsh_rule_exists(name: str) -> bool:
@@ -218,7 +218,7 @@ def _ensure_network_access(port: int) -> None:
                 print("[Dashboard] Refresh your phone browser to connect.")
             else:
                 print("[Dashboard] Setup was not allowed.")
-                print("[Dashboard] Phone connections may fail until JARVIS is run as Administrator.")
+                print("[Dashboard] Phone connections may fail until VYRON is run as Administrator.")
         except Exception as e:
             print(f"[Dashboard] Firewall setup error: {e}")
         finally:
@@ -397,8 +397,8 @@ def _ensure_certs() -> bool:
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
         who = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, "JARVIS Dashboard"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "JARVIS"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "VYRON Dashboard"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "VYRON"),
         ])
 
         # The SAN has to cover every address the phone might use: the LAN IP the
@@ -470,6 +470,8 @@ class DashboardServer:
         self._device_sessions: dict[str, dict] = {}  # device_token → {session_key}
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
         self._uploads_dir                 = UPLOADS_DIR
+        self._last_net_sample            = None
+        self._news_cache                 = (0.0, [])
         self._login_html                  = _read("login.html")
         self._app_html                    = _read("app.html")
         self.app                          = self._build_app()
@@ -557,6 +559,122 @@ class DashboardServer:
             return FileResponse(str(STATIC_DIR / "ui_upgrade.css"),
                                 media_type="text/css")
 
+        @app.get("/static/vyron_hud.css")
+        async def serve_hud_css():
+            return FileResponse(str(STATIC_DIR / "vyron_hud.css"), media_type="text/css")
+
+        @app.get("/static/vyron_hud.js")
+        async def serve_hud_js():
+            return FileResponse(str(STATIC_DIR / "vyron_hud.js"), media_type="application/javascript")
+
+        @app.get("/api/system")
+        async def system_snapshot(req: Request):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            import platform
+            import psutil
+            now = time.monotonic()
+            net = psutil.net_io_counters()
+            rate = None
+            old = self._last_net_sample
+            if old and net and now > old[0]:
+                delta = max(0, net.bytes_sent - old[1]) + max(0, net.bytes_recv - old[2])
+                rate = round(delta / (now - old[0]) / 1048576, 2)
+            if net:
+                self._last_net_sample = (now, net.bytes_sent, net.bytes_recv)
+            def probe(fn):
+                try:
+                    return fn()
+                except Exception:
+                    return None
+            battery = probe(psutil.sensors_battery)
+            disk = probe(lambda: psutil.disk_usage(str(Path.home())))
+            boot = probe(psutil.boot_time)
+            return JSONResponse({
+                "hostname": socket.gethostname(), "platform": platform.system(),
+                "cpu_percent": probe(lambda: psutil.cpu_percent(interval=None)),
+                "memory_percent": probe(lambda: psutil.virtual_memory().percent),
+                "disk_free_gb": round(disk.free / 1_000_000_000, 1) if disk else None,
+                "disk_total_gb": round(disk.total / 1_000_000_000, 1) if disk else None,
+                "battery_percent": battery.percent if battery else None,
+                "battery_charging": battery.power_plugged if battery else None,
+                "network_mbps": rate,
+                "uptime_seconds": max(0, int(time.time() - boot)) if boot else None,
+                "process_count": probe(lambda: len(psutil.pids())),
+            })
+
+        @app.get("/api/weather")
+        async def weather(req: Request, lat: float, lon: float):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                return JSONResponse({"error": "Invalid coordinates"}, status_code=400)
+            import json
+            import urllib.parse
+            import urllib.request
+            query = urllib.parse.urlencode({
+                "latitude": lat, "longitude": lon,
+                "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
+                "timezone": "auto",
+            })
+            def fetch():
+                with urllib.request.urlopen("https://api.open-meteo.com/v1/forecast?" + query, timeout=8) as response:
+                    return json.load(response)
+            try:
+                data = await asyncio.to_thread(fetch)
+                current = data["current"]
+                code = int(current.get("weather_code", -1))
+                if code == 0: description = "Clear sky"
+                elif code in (1, 2): description = "Partly cloudy"
+                elif code == 3: description = "Overcast"
+                elif code in (45, 48): description = "Fog"
+                elif code in (51, 53, 55, 56, 57): description = "Drizzle"
+                elif code in (61, 63, 65, 66, 67, 80, 81, 82): description = "Rain"
+                elif code in (71, 73, 75, 77, 85, 86): description = "Snow"
+                elif code in (95, 96, 99): description = "Thunderstorm"
+                else: description = "Current conditions"
+                return JSONResponse({
+                    "temperature_c": current["temperature_2m"],
+                    "humidity_percent": current.get("relative_humidity_2m"),
+                    "wind_kmh": current.get("wind_speed_10m"),
+                    "observed_at": current["time"],
+                    "description": description,
+                })
+            except Exception:
+                return JSONResponse({"error": "Weather service unavailable"}, status_code=503)
+
+        @app.get("/api/news")
+        async def news(req: Request):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            if time.time() - self._news_cache[0] < 600:
+                return JSONResponse({"stories": self._news_cache[1]})
+            import urllib.request
+            import xml.etree.ElementTree as ET
+            def fetch():
+                request = urllib.request.Request(
+                    "https://feeds.bbci.co.uk/news/world/rss.xml",
+                    headers={"User-Agent": "VYRON/1.0"},
+                )
+                with urllib.request.urlopen(request, timeout=8) as response:
+                    return response.read(1024 * 1024)
+            try:
+                xml = await asyncio.to_thread(fetch)
+                root = ET.fromstring(xml)
+                stories = []
+                for item in root.findall("./channel/item")[:8]:
+                    title = item.findtext("title") or "Untitled"
+                    link = item.findtext("link") or ""
+                    if not link.startswith("https://"):
+                        continue
+                    stories.append({"title": title, "url": link,
+                                    "published": item.findtext("pubDate") or "",
+                                    "source": "BBC News"})
+                self._news_cache = (time.time(), stories)
+                return JSONResponse({"stories": stories})
+            except Exception:
+                return JSONResponse({"error": "News service unavailable"}, status_code=503)
+
         @app.get("/login", response_class=HTMLResponse)
         async def login_page():
             return HTMLResponse(self._login_html)
@@ -605,7 +723,7 @@ class DashboardServer:
   h2{color:#f87171;margin-bottom:12px}p{color:#5e6a7e;font-size:14px}
 </style></head>
 <body><div><h2>Link Expired</h2>
-<p>Press <strong style="color:#dde3ed">Remote Control</strong> in JARVIS to get a new QR code.</p>
+<p>Press <strong style="color:#dde3ed">Remote Control</strong> in VYRON to get a new QR code.</p>
 </div></body></html>""")
 
             del self._pending_keys[key]
@@ -636,7 +754,7 @@ class DashboardServer:
   localStorage.setItem('jarvis_device_token','{dev_tok}');
   setTimeout(function(){{location.replace('/')}},400);
 </script>
-<p>Connecting to JARVIS…</p>
+<p>Connecting to VYRON…</p>
 </body></html>""")
 
         @app.post("/api/device-login")
@@ -886,5 +1004,5 @@ class DashboardServer:
 
         proto = "https" if use_ssl else "http"
         print(f"[Dashboard] {proto}://{self._ip}:{PORT}")
-        print("[Dashboard] Press 'Remote Control' in JARVIS UI to get the QR code.")
+        print("[Dashboard] Press 'Remote Control' in VYRON UI to get the QR code.")
         await uvicorn.Server(cfg).serve()

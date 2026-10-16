@@ -432,6 +432,9 @@ class HudCanvas(QWidget):
         except Exception:
             self.hud_style = "face"
         self._core_phase = 0.0
+        self._disk_free_gb = None
+        self._cpu_percent = None
+        self._battery_percent = None
 
         self._tick       = 0
         self._scale      = 1.0
@@ -827,7 +830,8 @@ class HudCanvas(QWidget):
         #    "J.A.R.V.I.S" and a name someone renamed to "MAX" are very
         #    different widths, and a fixed fraction of r spills one of them past
         #    the ring it is supposed to sit inside.
-        name = self._assistant_name or ""
+        name = (f"{self._disk_free_gb:.0f} GB" if self._disk_free_gb is not None
+                else "DISK N/A")
         if name:
             space = max(1.0, r * 0.018)
             fsz = max(8, int(min(r * 0.105,
@@ -891,7 +895,29 @@ class HudCanvas(QWidget):
             _band_t = 12.0
             _band_h = max(60.0, _sy_status - 12.0 - _band_t)
             _r = min(W * 0.46, _band_h / 2.0)
-            self._paint_core(p, cx, _band_t + _band_h / 2.0, _r, W, _band_h)
+            _core_cy = _band_t + _band_h / 2.0
+            self._paint_core(p, cx, _core_cy, _r, W, _band_h)
+
+            # System satellites use measured values and say N/A when unavailable.
+            for y, label, value in (
+                (_core_cy - _r * 0.72, "CPU",
+                 f"{self._cpu_percent:.0f}%" if self._cpu_percent is not None else "N/A"),
+                (_core_cy + _r * 0.72, "BATT",
+                 f"{self._battery_percent:.0f}%" if self._battery_percent is not None else "N/A"),
+            ):
+                orb_r = max(23.0, _r * 0.16)
+                rect = QRectF(cx - orb_r, y - orb_r, orb_r * 2, orb_r * 2)
+                p.setBrush(QBrush(qcol(C.PANEL)))
+                p.setPen(QPen(qcol(C.PRI_DIM), 2))
+                p.drawEllipse(rect)
+                p.setPen(QPen(qcol(C.PRI), 1))
+                p.setFont(QFont("Courier New", max(7, int(orb_r * 0.31)), QFont.Weight.Bold))
+                p.drawText(QRectF(cx - orb_r, y - orb_r * 0.75, orb_r * 2, orb_r * 0.55),
+                           Qt.AlignmentFlag.AlignCenter, label)
+                p.setPen(QPen(qcol(C.WHITE), 1))
+                p.setFont(QFont("Courier New", max(9, int(orb_r * 0.45)), QFont.Weight.Bold))
+                p.drawText(QRectF(cx - orb_r, y - orb_r * 0.10, orb_r * 2, orb_r * 0.85),
+                           Qt.AlignmentFlag.AlignCenter, value)
 
         # status text
         sy = _sy_status
@@ -3906,8 +3932,18 @@ class MainWindow(QMainWindow):
     def _update_metrics(self):
         snap = _metrics.snapshot()
 
-        # CPU
+        # CPU and disk/battery satellites in the central reactor
         cpu = snap["cpu"]
+        self.hud._cpu_percent = cpu
+        try:
+            self.hud._disk_free_gb = psutil.disk_usage(str(Path.home())).free / 1_000_000_000
+        except Exception:
+            self.hud._disk_free_gb = None
+        try:
+            battery = psutil.sensors_battery()
+            self.hud._battery_percent = battery.percent if battery else None
+        except Exception:
+            self.hud._battery_percent = None
         self._bar_cpu.set_value(cpu, f"{cpu:.0f}%")
 
         # MEM
@@ -5360,7 +5396,7 @@ class MainWindow(QMainWindow):
         """Update all name/theme-dependent UI elements and persist to config."""
         self._assistant_name = name.strip() or "JARVIS"
         display = self._assistant_name.upper()
-        self.setWindowTitle(f"{display} — {APP_VERSION}")
+        self.setWindowTitle("VYRON — Your Personal Autonomous Intelligence")
         self._title_lbl.setText(display)
         if display in ("JARVIS", "J.A.R.V.I.S"):
             self._sub_lbl.setText("Just A Rather Very Intelligent System")

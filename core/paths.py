@@ -22,7 +22,11 @@ def data_root() -> Path:
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
     else:
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    return base / "Vyron"
+    path = base / "Vyron"
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if sys.platform != "win32":
+        path.chmod(0o700)
+    return path
 
 
 def user_plugins_dir() -> Path:
