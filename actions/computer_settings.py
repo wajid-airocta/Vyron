@@ -6,6 +6,7 @@ import time
 import subprocess
 import platform
 from pathlib import Path
+from core.paths import data_root
 
 try:
     import pyautogui
@@ -33,9 +34,7 @@ else:
 
 
 def _get_base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
+    return data_root()
 
 def _get_api_key() -> str:
     path = _get_base_dir() / "config" / "api_keys.json"

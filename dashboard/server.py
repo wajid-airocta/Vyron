@@ -17,6 +17,7 @@ import socket
 import string
 import time
 from pathlib import Path
+from core.paths import data_root, resource_root
 
 _DEPS_OK = False
 try:
@@ -35,8 +36,8 @@ try:
 except Exception:
     pass
 
-BASE_DIR    = Path(__file__).resolve().parent.parent
-STATIC_DIR  = Path(__file__).parent / "static"
+BASE_DIR    = data_root()
+STATIC_DIR  = resource_root() / "dashboard" / "static"
 PORT        = 8000
 MAX_UPLOAD_MB = 500
 
@@ -550,6 +551,11 @@ class DashboardServer:
                                     media_type="application/javascript")
             from fastapi.responses import RedirectResponse
             return RedirectResponse(_CRYPTOJS_CDN)
+
+        @app.get("/static/ui_upgrade.css")
+        async def serve_ui_upgrade():
+            return FileResponse(str(STATIC_DIR / "ui_upgrade.css"),
+                                media_type="text/css")
 
         @app.get("/login", response_class=HTMLResponse)
         async def login_page():

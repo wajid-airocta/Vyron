@@ -22,6 +22,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from core.paths import data_root
 from typing import Callable, Generator
 
 import requests
@@ -31,9 +32,7 @@ import requests
 _SENT_END = re.compile(r'(?<=[.!?])\s+|(?<=\n)\s*\n')
 
 def get_base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
+    return data_root()
 
 
 BASE_DIR    = get_base_dir()

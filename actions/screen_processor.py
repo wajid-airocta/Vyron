@@ -12,6 +12,7 @@ import io
 import json
 import sys
 from pathlib import Path
+from core.paths import data_root
 
 import numpy as np
 
@@ -36,9 +37,7 @@ except ImportError:
 
 
 def _base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
+    return data_root()
 
 
 _BASE        = _base_dir()

@@ -14,6 +14,7 @@ else:
 import time
 import random
 from pathlib import Path
+from core.paths import data_root
 
 try:
     import pyautogui
@@ -30,9 +31,7 @@ except ImportError:
     _PYPERCLIP = False
 
 def _base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
+    return data_root()
 
 
 _BASE         = _base_dir()

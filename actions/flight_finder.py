@@ -5,13 +5,12 @@ import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from core.paths import data_root
 
 from config import is_windows, is_mac, is_linux
 
 def _get_base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
+    return data_root()
 
 
 BASE_DIR        = _get_base_dir()

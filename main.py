@@ -43,6 +43,7 @@ import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
+from core.paths import data_root, resource_root, user_plugins_dir
 
 import sounddevice as sd
 import numpy as np
@@ -90,13 +91,11 @@ from core.wake_word            import (
 WAKE_SLEEP_TIMEOUT = 120.0   # seconds (2 minutes)
 
 def get_base_dir():
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent
+    return data_root()
 
 BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
-PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
+PROMPT_PATH     = resource_root() / "core" / "prompt.txt"
 # The conversation's model. A NAME, not a decision: the ladder lives in
 # core/gemini.py and this is only whichever rung is currently in use, kept here
 # as a module attribute because plugins read it (chat_takeover asks main for it
@@ -610,7 +609,7 @@ class JarvisLive:
         self._enhanced_live = True  # proactive audio; auto-disabled if the server rejects it
         self._tuned_live    = True  # turn-taking / media / thinking knobs; same fallback
 
-        _base_dir = Path(__file__).resolve().parent
+        _base_dir = resource_root()
         _inline_names = {t["name"] for t in TOOL_DECLARATIONS}
 
         # File-backed tools: every actions/*.py with a TOOL dict, discovered the
@@ -625,7 +624,7 @@ class JarvisLive:
         # Plugins must not collide with either an inline tool or a discovered action.
         _core_names = _inline_names | self._action_registry.names()
         self._plugin_registry = discover_plugins(
-            plugins_dir=_base_dir / "plugins",
+            plugins_dir=user_plugins_dir(),
             core_tool_names=_core_names,
             # Console gets the full boot transcript; the activity log gets only
             # what the user has to know about. Every plugin loading correctly is
@@ -963,7 +962,7 @@ class JarvisLive:
         # Load customization from config
         try:
             _cfg = json.loads(open(API_CONFIG_PATH, encoding="utf-8").read())
-            self._asst_name = (_cfg.get("assistant_name") or "JARVIS").strip()
+            self._asst_name = (_cfg.get("assistant_name") or "VYRON").strip()
             _user_name = (_cfg.get("user_name") or "").strip()
         except Exception:
             self._asst_name = "JARVIS"

@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from core.paths import data_root, resource_root
 
 import psutil
 
@@ -29,6 +30,7 @@ os.environ.setdefault("QT_LOGGING_RULES", "qt.multimedia.*=false")
 from PyQt6.QtCore import (
     QEasingCurve, QLineF, QMimeData, QObject, QParallelAnimationGroup, QPointF,
     QPoint, QPropertyAnimation, QRect, QRectF, QSize, QSizeF, Qt, QTimer,
+    QEvent,
     QUrl, pyqtSignal,
 )
 from PyQt6.QtGui import (
@@ -52,7 +54,7 @@ except Exception as _e:            # noqa: BLE001 - reported, never fatal
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QMainWindow, QPushButton, QScrollArea, QSizePolicy, QSplitter,
-    QGraphicsScene, QGraphicsView,
+    QGraphicsDropShadowEffect, QGraphicsScene, QGraphicsView,
     QStackedWidget, QTextEdit, QVBoxLayout, QWidget, QProgressBar,
 )
 
@@ -63,9 +65,7 @@ except Exception:      # pragma: no cover — HUD must never die over cosmetics
 
 
 def _base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent
+    return data_root()
 
 BASE_DIR   = _base_dir()
 CONFIG_DIR = BASE_DIR / "config"
@@ -82,13 +82,13 @@ def _read_full_config() -> dict:
 
 # Single source of truth for the release name — the window title, the header
 # badge and the readme must never disagree again.
-APP_VERSION  = "MARK LV"
-APP_PROTOCOL = APP_VERSION.split()[-1]
+APP_VERSION  = "VYRON"
+APP_PROTOCOL = APP_VERSION
 
-_DEFAULT_W, _DEFAULT_H = 980, 700
-_MIN_W,     _MIN_H     = 820, 580
-_LEFT_W  = 148
-_RIGHT_W = 340
+_DEFAULT_W, _DEFAULT_H = 1120, 780
+_MIN_W,     _MIN_H     = 900, 650
+_LEFT_W  = 170
+_RIGHT_W = 390
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
@@ -97,11 +97,11 @@ class C:
     BG        = "#00060a"
     PANEL     = "#010d14"
     PANEL2    = "#010f18"
-    BORDER    = "#0d3347"
-    BORDER_B  = "#1a5c7a"
-    BORDER_A  = "#0f4060"
+    BORDER    = "#16465b"
+    BORDER_B  = "#286e86"
+    BORDER_A  = "#225a75"
     PRI       = "#00d4ff"
-    PRI_DIM   = "#007a99"
+    PRI_DIM   = "#4aafc5"
     PRI_GHO   = "#001f2e"
     ACC       = "#ff6b00"
     ACC2      = "#ffcc00"
@@ -110,7 +110,7 @@ class C:
     RED       = "#ff3355"
     MUTED_C   = "#ff3366"
     TEXT      = "#8ffcff"
-    TEXT_DIM  = "#3a8a9a"
+    TEXT_DIM  = "#73bfce"
     TEXT_MED  = "#5ab8cc"
     WHITE     = "#d8f8ff"
     DARK      = "#000d14"
@@ -913,7 +913,7 @@ class HudCanvas(QWidget):
             txt, col = f"{sym}  {self.state}", qcol(C.PRI)
 
         p.setPen(QPen(col, 1))
-        p.setFont(QFont("Courier New", 11, QFont.Weight.Bold))
+        p.setFont(QFont("Courier New", 14, QFont.Weight.Bold))
         p.drawText(QRectF(0, sy, W, 26), Qt.AlignmentFlag.AlignCenter, txt)
 
         # waveform — reacts to the real audio level (mic while listening,
@@ -948,7 +948,7 @@ class MetricBar(QWidget):
         self._color = color
         self._value = 0.0       # 0–100
         self._text  = "--"
-        self.setFixedHeight(38)
+        self.setFixedHeight(46)
         self.setMinimumWidth(80)
 
     def set_value(self, pct: float, text: str):
@@ -991,13 +991,13 @@ class MetricBar(QWidget):
             p.setBrush(QBrush(bar_col))
             p.drawRoundedRect(QRectF(bar_x, bar_y, fill_w, bar_h), 2, 2)
 
-        p.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        p.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
         p.setPen(QPen(qcol(C.TEXT_DIM), 1))
-        p.drawText(QRectF(8, 5, 50, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
+        p.drawText(QRectF(8, 6, 62, 18), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
 
-        p.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        p.setFont(QFont("Courier New", 11, QFont.Weight.Bold))
         p.setPen(QPen(bar_col if self._text != "--" else qcol(C.TEXT_DIM), 1))
-        p.drawText(QRectF(0, 4, W - 6, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self._text)
+        p.drawText(QRectF(0, 5, W - 6, 20), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self._text)
 
         p.end()
 
@@ -1138,7 +1138,7 @@ class FileDropZone(QWidget):
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(100)
+        self.setFixedHeight(112)
         self._current_file: str | None = None
         self._hovering  = False
         self._drag_over = False
@@ -1259,14 +1259,14 @@ class _DropCanvas(QWidget):
         p.drawLine(QPointF(cx - 8, cy - 6), QPointF(cx, cy - 14))
         p.drawLine(QPointF(cx + 8, cy - 6), QPointF(cx, cy - 14))
         p.drawLine(QPointF(cx - 14, cy + 4), QPointF(cx + 14, cy + 4))
-        p.setFont(QFont("Courier New", 8))
+        p.setFont(QFont("Courier New", 10))
         p.setPen(QPen(qcol(C.PRI_DIM if not hover else C.TEXT), 1))
-        p.drawText(QRectF(0, cy + 8, W, 16), Qt.AlignmentFlag.AlignCenter,
+        p.drawText(QRectF(0, cy + 8, W, 20), Qt.AlignmentFlag.AlignCenter,
                    "Drop file here  or  Click to Browse")
-        p.setFont(QFont("Courier New", 7))
-        p.setPen(QPen(qcol("#1a4a5a"), 1))
-        p.drawText(QRectF(0, cy + 24, W, 14), Qt.AlignmentFlag.AlignCenter,
-                   "Images · Video · Audio · PDF · Docs · Code · Data")
+        p.setFont(QFont("Courier New", 9))
+        p.setPen(QPen(qcol(C.TEXT_DIM), 1))
+        p.drawText(QRectF(0, cy + 28, W, 18), Qt.AlignmentFlag.AlignCenter,
+                   "Images · Video · Audio · Docs · Code · Data")
 
     def _paint_drag_over(self, p, W, H):
         cx, cy = W / 2, H / 2
@@ -1619,7 +1619,7 @@ class CustomizeOverlay(QWidget):
     saved = pyqtSignal(str, str, str, str)   # assistant_name, user_name, ui_color, voice
     _OW, _OH = 400, 588
 
-    def __init__(self, assistant_name="JARVIS", user_name="",
+    def __init__(self, assistant_name="VYRON", user_name="",
                  ui_color=DEFAULT_UI_COLOR, voice="", parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -1825,7 +1825,7 @@ class CustomizeOverlay(QWidget):
         self.hide()
 
     def _save(self):
-        name = self._name_input.text().strip() or "JARVIS"
+        name = self._name_input.text().strip() or "VYRON"
         user = self._user_input.text().strip()
         self.saved.emit(name, user, self._sel_color or DEFAULT_UI_COLOR, self._sel_voice)
         self.hide()
@@ -2965,7 +2965,7 @@ class MainWindow(QMainWindow):
 
         # Load customization from config
         _cfg = _read_full_config()
-        self._assistant_name: str = (_cfg.get("assistant_name") or "JARVIS").strip()
+        self._assistant_name: str = (_cfg.get("assistant_name") or "VYRON").strip()
         _display = self._assistant_name.upper()
 
         # Apply the saved UI colour BEFORE panels/stylesheets are built
@@ -2973,14 +2973,15 @@ class MainWindow(QMainWindow):
         if _ui_color and _ui_color.lower() != DEFAULT_UI_COLOR:
             apply_ui_accent(_ui_color)
 
-        self.setWindowTitle(f"{_display} — {APP_VERSION}")
+        self.setWindowTitle("VYRON — Your Personal Autonomous Intelligence")
         self.setMinimumSize(_MIN_W, _MIN_H)
-        self.resize(_DEFAULT_W, _DEFAULT_H)
-
         screen = QApplication.primaryScreen().availableGeometry()
+        width = min(_DEFAULT_W, screen.width())
+        height = min(_DEFAULT_H, screen.height())
+        self.resize(width, height)
         self.move(
-            (screen.width()  - _DEFAULT_W) // 2,
-            (screen.height() - _DEFAULT_H) // 2,
+            screen.x() + (screen.width()  - width) // 2,
+            screen.y() + (screen.height() - height) // 2,
         )
 
         self.on_text_command   = None
@@ -3730,9 +3731,32 @@ class MainWindow(QMainWindow):
         script  = Path(__file__).resolve().parent / "main.py"
         python  = Path(sys.executable)
         desktop = self._get_desktop_dir()
+        if getattr(sys, "frozen", False):
+            try:
+                if platform.system() == "Darwin":
+                    app = next((p for p in python.parents if p.suffix == ".app"), None)
+                    if app is None:
+                        raise RuntimeError("Could not locate VYRON.app")
+                    shortcut = desktop / "VYRON.app"
+                    if not shortcut.exists() and not shortcut.is_symlink():
+                        shortcut.symlink_to(app, target_is_directory=True)
+                elif platform.system() == "Windows":
+                    self._create_lnk_windows(str(desktop / "VYRON.lnk"),
+                                             str(python), "", str(python.parent),
+                                             str(python))
+                else:
+                    shortcut = desktop / "VYRON.desktop"
+                    shortcut.write_text("[Desktop Entry]\nName=VYRON\n"
+                                        f"Exec={python}\nType=Application\n"
+                                        "Terminal=false\nCategories=Utility;\n")
+                    shortcut.chmod(0o755)
+                self._log.append_log("SYS: Desktop shortcut created.")
+            except Exception as exc:
+                self._log.append_log(f"ERR: Shortcut failed — {exc}")
+            return
 
         # Arc-reactor icon (.ico — also exported as .png for Linux/macOS)
-        ico_path = Path(__file__).resolve().parent / "config" / "jarvis.ico"
+        ico_path = resource_root() / "config" / "jarvis.ico"
         if not ico_path.exists():
             self._build_jarvis_icon(ico_path)
 
@@ -3775,7 +3799,7 @@ class MainWindow(QMainWindow):
                     '<plist version="1.0"><dict>\n'
                     '  <key>CFBundleExecutable</key><string>JARVIS</string>\n'
                     '  <key>CFBundleIdentifier</key>'
-                    '<string>com.jarvis.assistant</string>\n'
+                    '<string>com.airocta.vyron</string>\n'
                     '  <key>CFBundleName</key><string>J.A.R.V.I.S</string>\n'
                     '  <key>CFBundlePackageType</key><string>APPL</string>\n'
                     '  <key>CFBundleVersion</key><string>1.0</string>\n'
@@ -3932,7 +3956,7 @@ class MainWindow(QMainWindow):
 
     def _build_header(self) -> QWidget:
         w = QWidget()
-        w.setFixedHeight(54)
+        w.setFixedHeight(68)
         w.setStyleSheet(f"background: {C.DARK}; border-bottom: 1px solid {C.BORDER_B};")
         lay = QHBoxLayout(w)
         lay.setContentsMargins(16, 0, 16, 0)
@@ -3946,7 +3970,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(_badge(APP_VERSION, C.PRI_DIM))
         lay.addSpacing(8)
         self._drawer_btn = QPushButton("⚙")
-        self._drawer_btn.setFixedSize(26, 26)
+        self._drawer_btn.setFixedSize(48, 48)
         self._drawer_btn.setFont(QFont("Courier New", 11))
         self._drawer_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._drawer_btn.setToolTip("Settings & Controls")
@@ -3970,7 +3994,7 @@ class MainWindow(QMainWindow):
         # day. Separating them by that — setup behind ⚙, everyday behind 🎛 —
         # is what makes each list short enough to read at a glance.
         self._ctrl_btn = QPushButton("🎛")
-        self._ctrl_btn.setFixedSize(26, 26)
+        self._ctrl_btn.setFixedSize(48, 48)
         self._ctrl_btn.setFont(QFont("Courier New", 11))
         self._ctrl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ctrl_btn.setToolTip("Controls — the everyday switches")
@@ -4129,7 +4153,7 @@ class MainWindow(QMainWindow):
         lay.addLayout(self._build_input_row())
 
         self._interrupt_btn = QPushButton("✋  INTERRUPT  [ESC]")
-        self._interrupt_btn.setFixedHeight(34)
+        self._interrupt_btn.setFixedHeight(48)
         self._interrupt_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
         self._interrupt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._interrupt_btn.setStyleSheet(f"""
@@ -4148,7 +4172,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._interrupt_btn)
 
         self._mute_btn = QPushButton("🎙  MICROPHONE ACTIVE")
-        self._mute_btn.setFixedHeight(30)
+        self._mute_btn.setFixedHeight(48)
         self._mute_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
         self._mute_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._mute_btn.clicked.connect(self._toggle_mute)
@@ -4392,7 +4416,7 @@ class MainWindow(QMainWindow):
         self._input = QLineEdit()
         self._input.setPlaceholderText("Type a command or question…")
         self._input.setFont(QFont("Courier New", 9))
-        self._input.setFixedHeight(30)
+        self._input.setFixedHeight(48)
         self._input.setStyleSheet(f"""
             QLineEdit {{
                 background: #000d14; color: {C.WHITE};
@@ -4404,7 +4428,7 @@ class MainWindow(QMainWindow):
         row.addWidget(self._input)
 
         send = QPushButton("▸")
-        send.setFixedSize(30, 30)
+        send.setFixedSize(48, 48)
         send.setFont(QFont("Courier New", 11, QFont.Weight.Bold))
         send.setCursor(Qt.CursorShape.PointingHandCursor)
         send.setStyleSheet(f"""
@@ -4883,7 +4907,7 @@ class MainWindow(QMainWindow):
 
     def _build_footer(self) -> QWidget:
         w = QWidget()
-        w.setFixedHeight(22)
+        w.setFixedHeight(30)
         w.setStyleSheet(f"background: {C.DARK}; border-top: 1px solid {C.BORDER};")
         lay = QHBoxLayout(w); lay.setContentsMargins(14, 0, 14, 0)
 
@@ -4957,7 +4981,7 @@ class MainWindow(QMainWindow):
                 key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                     r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
                 try:
-                    winreg.QueryValueEx(key, "JARVIS_AI")
+                    winreg.QueryValueEx(key, "VYRON")
                     return True
                 except FileNotFoundError:
                     return False
@@ -4965,7 +4989,7 @@ class MainWindow(QMainWindow):
                     winreg.CloseKey(key)
             elif _OS == "Darwin":
                 return (Path.home() / "Library" / "LaunchAgents"
-                        / "com.jarvis.assistant.plist").exists()
+                        / "com.airocta.vyron.plist").exists()
             else:
                 return (Path.home() / ".config" / "autostart" / "jarvis.desktop").exists()
         except Exception:
@@ -4975,22 +4999,23 @@ class MainWindow(QMainWindow):
         currently_on = self._check_autostart()
         try:
             script = str(Path(__file__).resolve().parent / "main.py")
+            frozen = getattr(sys, "frozen", False)
             if _OS == "Windows":
                 import winreg
                 reg = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                     r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
                 if currently_on:
-                    winreg.DeleteValue(reg, "JARVIS_AI")
+                    winreg.DeleteValue(reg, "VYRON")
                 else:
                     pythonw = Path(sys.executable).parent / "pythonw.exe"
                     exe = str(pythonw if pythonw.exists() else sys.executable)
-                    winreg.SetValueEx(reg, "JARVIS_AI", 0, winreg.REG_SZ,
-                                      f'"{exe}" "{script}"')
+                    winreg.SetValueEx(reg, "VYRON", 0, winreg.REG_SZ,
+                                      f'"{exe}"' if frozen else f'"{exe}" "{script}"')
                 winreg.CloseKey(reg)
             elif _OS == "Darwin":
                 plist_dir = Path.home() / "Library" / "LaunchAgents"
                 plist_dir.mkdir(parents=True, exist_ok=True)
-                plist = plist_dir / "com.jarvis.assistant.plist"
+                plist = plist_dir / "com.airocta.vyron.plist"
                 if currently_on:
                     plist.unlink(missing_ok=True)
                 else:
@@ -4999,11 +5024,11 @@ class MainWindow(QMainWindow):
                         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
                         '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
                         '<plist version="1.0"><dict>\n'
-                        '  <key>Label</key><string>com.jarvis.assistant</string>\n'
+                        '  <key>Label</key><string>com.airocta.vyron</string>\n'
                         '  <key>ProgramArguments</key><array>\n'
-                        f'    <string>{sys.executable}</string>\n'
-                        f'    <string>{script}</string>\n'
-                        '  </array>\n'
+                        f'    <string>{next((str(p) for p in Path(sys.executable).parents if p.suffix == ".app"), sys.executable) if frozen else sys.executable}</string>\n'
+                        + ('' if frozen else f'    <string>{script}</string>\n')
+                        + '  </array>\n'
                         '  <key>RunAtLoad</key><true/>\n'
                         '</dict></plist>\n'
                     )
@@ -5596,11 +5621,68 @@ class _RootShim:
         pass
 
 
+class _ReadabilityFilter(QObject):
+    """Scale standard Qt text and show a visible keyboard focus halo."""
+
+    _TEXT_WIDGETS = (QLabel, QPushButton, QLineEdit, QTextEdit, QComboBox)
+    _FOCUS_WIDGETS = (QPushButton, QLineEdit, QTextEdit, QComboBox)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._family = ("Helvetica Neue" if _OS == "Darwin" else
+                        QFontDatabase.systemFont(
+                            QFontDatabase.SystemFont.GeneralFont).family())
+
+    def apply(self, widget: QWidget) -> None:
+        if not isinstance(widget, self._TEXT_WIDGETS):
+            return
+        if widget.property("readabilityScaled"):
+            return
+        # Tiny icon-only close controls cannot hold larger text.
+        if (isinstance(widget, QPushButton) and
+                widget.maximumWidth() <= 24 and widget.maximumHeight() <= 24):
+            return
+        widget.setProperty("readabilityScaled", True)
+        font = widget.font()
+        current = font.pointSizeF()
+        minimum = (12.0 if isinstance(widget, QTextEdit) else
+                   11.0 if isinstance(widget, (QPushButton, QLineEdit, QComboBox))
+                   else 10.0)
+        font.setFamily(self._family)
+        font.setPointSizeF(max(minimum, current * 1.25 if current > 0 else minimum))
+        widget.setFont(font)
+
+    def apply_tree(self, root: QWidget) -> None:
+        self.apply(root)
+        for widget in root.findChildren(QWidget):
+            self.apply(widget)
+
+    def eventFilter(self, obj, event):
+        if isinstance(obj, self._TEXT_WIDGETS):
+            if event.type() == QEvent.Type.Show:
+                self.apply(obj)
+            elif event.type() == QEvent.Type.FocusIn and isinstance(obj, self._FOCUS_WIDGETS):
+                if obj.graphicsEffect() is None:
+                    halo = QGraphicsDropShadowEffect(obj)
+                    halo.setBlurRadius(14)
+                    halo.setOffset(0)
+                    halo.setColor(QColor(C.WHITE))
+                    obj.setGraphicsEffect(halo)
+                    obj.setProperty("readabilityFocusHalo", True)
+            elif event.type() == QEvent.Type.FocusOut and obj.property("readabilityFocusHalo"):
+                obj.setGraphicsEffect(None)
+                obj.setProperty("readabilityFocusHalo", False)
+        return False
+
+
 class JarvisUI:
     def __init__(self, face_path: str, size=None):
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setStyle("Fusion")
+        self._readability_filter = _ReadabilityFilter(self._app)
+        self._app.installEventFilter(self._readability_filter)
         self._win = MainWindow(face_path)
+        self._readability_filter.apply_tree(self._win)
         self.root = _RootShim(self._app)
         self._win.show()
 

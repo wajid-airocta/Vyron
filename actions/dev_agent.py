@@ -4,12 +4,11 @@ import json
 import re
 import time
 from pathlib import Path
+from core.paths import data_root
 
 
 def get_base_dir():
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
+    return data_root()
 
 
 BASE_DIR         = get_base_dir()

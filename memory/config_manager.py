@@ -1,11 +1,10 @@
 import json
 import sys
 from pathlib import Path
+from core.paths import data_root
 
 def get_base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
+    return data_root()
 
 BASE_DIR    = get_base_dir()
 CONFIG_DIR  = BASE_DIR / "config"
@@ -53,7 +52,7 @@ def is_configured() -> bool:
 
 def get_assistant_name() -> str:
     """Return the configured assistant name, or 'JARVIS' if not set."""
-    return load_api_keys().get("assistant_name", "JARVIS") or "JARVIS"
+    return load_api_keys().get("assistant_name", "VYRON") or "JARVIS"
 
 
 def get_user_name() -> str:
@@ -70,7 +69,7 @@ def save_assistant_config(assistant_name: str, user_name: str) -> None:
             data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except Exception:
             data = {}
-    data["assistant_name"] = assistant_name.strip() or "JARVIS"
+    data["assistant_name"] = assistant_name.strip() or "VYRON"
     data["user_name"] = user_name.strip()
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
