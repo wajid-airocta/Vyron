@@ -567,6 +567,29 @@ class DashboardServer:
         async def serve_hud_js():
             return FileResponse(str(STATIC_DIR / "vyron_hud.js"), media_type="application/javascript")
 
+        @app.get("/api/profile")
+        async def get_profile(req: Request):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            from memory.config_manager import get_user_name
+            return JSONResponse({"user_name": get_user_name()})
+
+        @app.post("/api/profile")
+        async def set_profile(req: Request):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            try:
+                payload = await req.json()
+                name = payload.get("user_name", "")
+                if not isinstance(name, str) or len(name) > 80 or any(ord(c) < 32 for c in name):
+                    raise ValueError("Invalid name")
+                from memory.config_manager import get_assistant_name, save_assistant_config
+                save_assistant_config(get_assistant_name(), name)
+                return JSONResponse({"ok": True, "user_name": name.strip(),
+                                     "note": "The next Live session will use this name."})
+            except (ValueError, TypeError, AttributeError):
+                return JSONResponse({"error": "Invalid name"}, status_code=400)
+
         @app.get("/api/system")
         async def system_snapshot(req: Request):
             if not _auth(req):

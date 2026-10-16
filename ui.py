@@ -1685,10 +1685,10 @@ class CustomizeOverlay(QWidget):
         lay.addWidget(self._name_input)
 
         lay.addSpacing(4)
-        lay.addWidget(_lbl("YOUR NAME  (leave blank for default sir / efendim)", 8,
+        lay.addWidget(_lbl("YOUR NAME  (used naturally in greetings and topic changes)", 8,
                             color=C.TEXT_DIM, align=Qt.AlignmentFlag.AlignLeft))
         self._user_input = QLineEdit(user_name)
-        self._user_input.setPlaceholderText("e.g.  Tony   (leave blank for auto)")
+        self._user_input.setPlaceholderText("Your preferred name (optional)")
         self._user_input.setFont(QFont("Courier New", 10))
         self._user_input.setFixedHeight(32)
         self._user_input.setStyleSheet(_fs)

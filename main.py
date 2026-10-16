@@ -987,14 +987,14 @@ class JarvisLive:
         # Address form is a property of the language being spoken, so it is
         # stated as a principle rather than a two-language lookup — the model
         # already knows the respectful register of whatever language it is in.
-        _addr = (f"ADDRESS: Always call the user '{_user_name}'."
+        _addr = (f"The user's preferred name is '{_user_name}'. Use it naturally "
+                 "when opening a conversation or moving to a new topic, and "
+                 "occasionally when it suits the sentence. Do not say the name "
+                 "in every reply or repeat it in consecutive replies. This is "
+                 "the USER'S name, never your own name."
                  if _user_name
-                 else 'ADDRESS: Address the user with the ordinary respectful form '
-                      'for a superior in the language you are currently speaking — '
-                      '"sir" in English, its everyday equivalent in any other '
-                      'language. Never an archaic or aristocratic form, and never '
-                      'the form from a different language than the one you are '
-                      'speaking in this sentence.')
+                 else "No preferred user name is set. Address the user naturally "
+                      "without inventing a name or repeating a title in every reply.")
         identity_ctx = (
             f"[IDENTITY]\n"
             f"Your name is {self._asst_name}. "
@@ -1754,7 +1754,8 @@ class JarvisLive:
             return (e.get("value", "") if isinstance(e, dict) else str(e)).strip()
 
         lang = _val("language")
-        name = _val("name")
+        from memory.config_manager import get_user_name
+        name = get_user_name().strip() or _val("name")
         time_str = datetime.now().strftime("%H:%M")
 
         # Start fetching news immediately — runs in parallel while phase 1 plays
@@ -1772,7 +1773,7 @@ class JarvisLive:
         lang_clause = (f" Speak this greeting in {lang}, then follow the "
                        f"user's own language from their first reply onward."
                        if lang else "")
-        name_clause = f" Address the user as {name}." if name else ""
+        name_clause = f" You may greet the user by their preferred name, {name}, once." if name else ""
 
         # Inject last session context if available — pop removes it so it's never repeated
         last = await asyncio.to_thread(pop_last_session)

@@ -12,6 +12,13 @@ VYRON is a desktop build of the [Mark LV](https://github.com/FatihMakes/Mark-LV)
 
 The Mac build produced on Apple silicon runs on Apple silicon Macs. A separate build on an Intel Mac is required for Intel Macs. The builds are unsigned, so macOS Gatekeeper and Windows SmartScreen may show publisher warnings on other devices. Signing and notarization require platform developer credentials.
 
+## Phone dashboard and Android Auto
+
+- **Android phone:** Download the APK from the latest successful **Build VYRON for Android** GitHub Actions run. Open VYRON on your Mac, then enter its Remote Control HTTPS address in the phone app and pair with the Mac's code. The phone dashboard follows the portrait video layout; the Mac dashboard expands into landscape columns.
+- **Android Auto:** VYRON WEATHER is a separate car screen using Android Auto's supported weather template. Grant phone location access, then connect to Android Auto and open VYRON WEATHER. The main phone dashboard cannot be projected as an arbitrary car screen. Vehicle and head-unit behavior must be checked in the car.
+- **API source:** With no override key, phone commands use the paired Mac's working Gemini key through VYRON. The key never ships in the APK. The Mac must be running and reachable. The Android API settings can store a personal override in Android Keystore; that override sends text prompts directly to Gemini.
+- **Your name:** Set it in the desktop assistant customization or the phone dashboard's Settings. Gemini Live uses it at conversation openings and topic changes, with occasional natural use thereafter. A newly started Live session picks up the change.
+
 ## Build from source
 
 Install the Python dependencies from `requirements.txt`, then install PyInstaller and run `python -m PyInstaller --clean --noconfirm Vyron.spec` on the target OS. On Mac, `scripts/build_macos.sh` also creates the DMG.
