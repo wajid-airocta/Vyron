@@ -1,0 +1,63 @@
+name: Build VYRON for Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '**.py'
+      - 'requirements.txt'
+      - 'Vyron.spec'
+      - 'assets/**'
+      - '.github/workflows/build-windows.yml'
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+      - name: Build application
+        run: python -m PyInstaller --clean --noconfirm Vyron.spec
+      - name: Install NSIS
+        run: choco install nsis --yes --no-progress
+      - name: Create Windows installer
+        shell: pwsh
+        run: |
+          $nsi = @'
+          !include "MUI2.nsh"
+          Name "VYRON"
+          OutFile "Vyron-Windows-x64-Setup.exe"
+          InstallDir "$LOCALAPPDATA\Programs\Vyron"
+          RequestExecutionLevel user
+          !define MUI_ABORTWARNING
+          !insertmacro MUI_PAGE_DIRECTORY
+          !insertmacro MUI_PAGE_INSTFILES
+          !insertmacro MUI_UNPAGE_CONFIRM
+          !insertmacro MUI_UNPAGE_INSTFILES
+          !insertmacro MUI_LANGUAGE "English"
+          Section "Install"
+            SetOutPath "$INSTDIR"
+            File /r "dist\Vyron\*"
+            CreateDirectory "$SMPROGRAMS\Vyron"
+            CreateShortcut "$SMPROGRAMS\Vyron\VYRON.lnk" "$INSTDIR\Vyron.exe"
+            WriteUninstaller "$INSTDIR\Uninstall.exe"
+          SectionEnd
+          Section "Uninstall"
+            Delete "$SMPROGRAMS\Vyron\VYRON.lnk"
+            RMDir "$SMPROGRAMS\Vyron"
+            RMDir /r "$INSTDIR"
+          SectionEnd
+          '@
+          Set-Content -Path installer.nsi -Value $nsi
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" installer.nsi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vyron-Windows-x64-Setup
+          path: Vyron-Windows-x64-Setup.exe
