@@ -87,7 +87,6 @@ APP_PROTOCOL = APP_VERSION
 
 _DEFAULT_W, _DEFAULT_H = 1120, 780
 _MIN_W,     _MIN_H     = 900, 650
-_LEFT_W  = 170
 _RIGHT_W = 390
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
@@ -456,6 +455,7 @@ class HudCanvas(QWidget):
         self._disk_free_gb = None
         self._cpu_percent = None
         self._battery_percent = None
+        self._radial_metrics = {}
 
         self._tick       = 0
         self._scale      = 1.0
@@ -827,6 +827,39 @@ class HudCanvas(QWidget):
             p.drawText(QRectF(cx - r, cy - fsz, r * 2, fsz * 2),
                        Qt.AlignmentFlag.AlignCenter, name)
 
+    def _paint_radial_metrics(self, p: QPainter, cx: float, cy: float, radius: float):
+        """Position live Mac measurements on an open circular orbit."""
+        values = self._radial_metrics
+        nodes = (
+            (-90, "CPU", values.get("cpu", "N/A"), C.PRI),
+            (-50, "MEM", values.get("mem", "N/A"), C.ACC2),
+            (-10, "NET", values.get("net", "N/A"), C.GREEN),
+            (30, "GPU", values.get("gpu", "N/A"), C.ACC),
+            (70, "TEMP", values.get("tmp", "N/A"), "#ff6688"),
+            (110, "BATT", values.get("batt", "N/A"), C.PRI_DIM),
+            (150, "UPTIME", values.get("uptime", "N/A"), C.GREEN),
+            (190, "PROC", values.get("proc", "N/A"), C.TEXT_MED),
+            (230, "OS", values.get("os", "N/A"), C.ACC2),
+        )
+        orbit = radius * 1.16
+        for degrees, label, value, colour in nodes:
+            a = math.radians(degrees)
+            ca, sa = math.cos(a), math.sin(a)
+            dot_x, dot_y = cx + ca * radius * 1.04, cy + sa * radius * 1.04
+            text_x, text_y = cx + ca * orbit, cy + sa * orbit
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(qcol(colour)))
+            p.drawEllipse(QRectF(dot_x - 2, dot_y - 2, 4, 4))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(qcol(C.TEXT_DIM), 1))
+            p.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+            p.drawText(QRectF(text_x - 48, text_y - 15, 96, 12),
+                       Qt.AlignmentFlag.AlignCenter, label)
+            p.setPen(QPen(qcol(colour if value != "N/A" else C.TEXT_DIM), 1))
+            p.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
+            p.drawText(QRectF(text_x - 56, text_y - 1, 112, 17),
+                       Qt.AlignmentFlag.AlignCenter, value)
+
     def paintEvent(self, _):
         p = QPainter(self)
         if not p.isActive():      # device not ready (e.g. 0-size during layout) — skip cleanly
@@ -845,7 +878,9 @@ class HudCanvas(QWidget):
         # Sized to the band between the top of the canvas and the status line,
         # capped by width, so it fills the HUD at any window size — including
         # fullscreen — without ever colliding with the status text below.
-        _sy_status = cy + fw * 0.40
+        # Keep a clear lane below the orbital metrics for the status and the
+        # temporary highlight at the foot of the HUD.
+        _sy_status = min(cy + fw * 0.40, H - 190)
         if self._avatar is not None and self.hud_style == "face":
             _band_t = 12.0
             _band_h = max(60.0, _sy_status - 12.0 - _band_t)
@@ -873,30 +908,12 @@ class HudCanvas(QWidget):
         else:
             _band_t = 12.0
             _band_h = max(60.0, _sy_status - 12.0 - _band_t)
-            _r = min(W * 0.46, _band_h / 2.0)
+            # Leave an open orbit for the live system measurements.
+            _r = min(W * 0.32, _band_h * 0.36)
             _core_cy = _band_t + _band_h / 2.0
             self._paint_core(p, cx, _core_cy, _r, W, _band_h)
 
-            # System satellites use measured values and say N/A when unavailable.
-            for y, label, value in (
-                (_core_cy - _r * 0.72, "CPU",
-                 f"{self._cpu_percent:.0f}%" if self._cpu_percent is not None else "N/A"),
-                (_core_cy + _r * 0.72, "BATT",
-                 f"{self._battery_percent:.0f}%" if self._battery_percent is not None else "N/A"),
-            ):
-                orb_r = max(23.0, _r * 0.16)
-                rect = QRectF(cx - orb_r, y - orb_r, orb_r * 2, orb_r * 2)
-                p.setBrush(QBrush(qcol(C.PANEL)))
-                p.setPen(QPen(qcol(C.PRI_DIM), 2))
-                p.drawEllipse(rect)
-                p.setPen(QPen(qcol(C.PRI), 1))
-                p.setFont(QFont("Courier New", max(7, int(orb_r * 0.31)), QFont.Weight.Bold))
-                p.drawText(QRectF(cx - orb_r, y - orb_r * 0.75, orb_r * 2, orb_r * 0.55),
-                           Qt.AlignmentFlag.AlignCenter, label)
-                p.setPen(QPen(qcol(C.WHITE), 1))
-                p.setFont(QFont("Courier New", max(9, int(orb_r * 0.45)), QFont.Weight.Bold))
-                p.drawText(QRectF(cx - orb_r, y - orb_r * 0.10, orb_r * 2, orb_r * 0.85),
-                           Qt.AlignmentFlag.AlignCenter, value)
+            self._paint_radial_metrics(p, cx, _core_cy, _r)
 
         # status text
         sy = _sy_status
@@ -944,61 +961,6 @@ class HudCanvas(QWidget):
             p.fillRect(QRectF(wx0 + i * bw, wy + 20 - hgt, bw - 1, hgt), cl)
 
         p.end()   # end deterministically so the backing store never flushes an active painter
-
-class MetricBar(QWidget):
-
-    def __init__(self, label: str, color: str = C.PRI, parent=None):
-        super().__init__(parent)
-        self._label = label
-        self._color = color
-        self._value = 0.0       # 0–100
-        self._text  = "--"
-        self.setFixedHeight(46)
-        self.setMinimumWidth(80)
-
-    def set_value(self, pct: float, text: str):
-        v = max(0.0, min(100.0, pct))
-        if v == self._value and text == self._text:
-            return          # unchanged — skip the repaint
-        self._value = v
-        self._text  = text
-        self.update()
-
-    def paintEvent(self, _):
-        p = QPainter(self)
-        if not p.isActive():
-            return
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        W, H = self.width(), self.height()
-
-        bar_h   = 4
-        bar_y   = H - bar_h - 5
-        bar_w   = W - 12
-        bar_x   = 6
-        fill_w  = int(bar_w * self._value / 100)
-
-        p.setPen(Qt.PenStyle.NoPen)
-
-        if self._value > 85:
-            bar_col = qcol(C.RED)
-        elif self._value > 65:
-            bar_col = qcol(C.ACC)
-        else:
-            bar_col = qcol(self._color)
-
-        if fill_w > 0:
-            p.setBrush(QBrush(bar_col))
-            p.drawRoundedRect(QRectF(bar_x, bar_y, fill_w, bar_h), 2, 2)
-
-        p.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
-        p.setPen(QPen(qcol(C.TEXT_DIM), 1))
-        p.drawText(QRectF(8, 6, 62, 18), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
-
-        p.setFont(QFont("Courier New", 11, QFont.Weight.Bold))
-        p.setPen(QPen(bar_col if self._text != "--" else qcol(C.TEXT_DIM), 1))
-        p.drawText(QRectF(0, 5, W - 6, 20), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self._text)
-
-        p.end()
 
 class LogWidget(QTextEdit):
     _sig = pyqtSignal(str)
@@ -3030,9 +2992,6 @@ class MainWindow(QMainWindow):
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
-        self._left_panel = self._build_left_panel()
-        body.addWidget(self._left_panel, stretch=0)
-
         # Center column: HUD and quiz; supplemental content floats over the HUD
         self.hud = HudCanvas(face_path, _display)
         self.hud.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -3939,51 +3898,33 @@ class MainWindow(QMainWindow):
             self.hud._battery_percent = battery.percent if battery else None
         except Exception:
             self.hud._battery_percent = None
-        self._bar_cpu.set_value(cpu, f"{cpu:.0f}%")
-
-        # MEM
         mem = snap["mem"]
-        self._bar_mem.set_value(mem, f"{mem:.0f}%")
-
-        # NET
         net = snap["net"]
-        if net < 1.0:
-            net_str = f"{net*1024:.0f}KB/s"
-        else:
-            net_str = f"{net:.1f}MB/s"
-        net_pct = min(100, net * 10)  # 10 MB/s = %100
-        self._bar_net.set_value(net_pct, net_str)
-
-        # GPU
+        net_str = f"{net*1024:.0f}KB/s" if net < 1.0 else f"{net:.1f}MB/s"
         gpu = snap["gpu"]
-        if gpu >= 0:
-            self._bar_gpu.set_value(gpu, f"{gpu:.0f}%")
-        else:
-            self._bar_gpu.set_value(0, "N/A")
-
-        # TMP
         tmp = snap["tmp"]
-        if tmp >= 0:
-            tmp_pct = min(100, (tmp / 100) * 100)
-            self._bar_tmp.set_value(tmp_pct, f"{tmp:.0f}°C")
-        else:
-            self._bar_tmp.set_value(0, "N/A")
-
         try:
-            boot_t  = psutil.boot_time()
-            elapsed = time.time() - boot_t
-            h = int(elapsed // 3600)
-            m = int((elapsed % 3600) // 60)
-            self._uptime_lbl.setText(f"UP  {h:02d}:{m:02d}")
+            elapsed = time.time() - psutil.boot_time()
+            uptime = f"{int(elapsed // 3600)}h {int((elapsed % 3600) // 60):02d}m"
         except Exception:
-            self._uptime_lbl.setText("UP  --:--")
-
+            uptime = "N/A"
         try:
-            proc_count = len(psutil.pids())
-            self._proc_lbl.setText(f"PROC  {proc_count}")
+            processes = str(len(psutil.pids()))
         except Exception:
-            self._proc_lbl.setText("PROC  --")
-
+            processes = "N/A"
+        os_name = {"Windows": "WIN", "Darwin": "macOS", "Linux": "LINUX"}.get(_OS, _OS.upper())
+        self.hud._radial_metrics = {
+            "cpu": f"{cpu:.0f}%",
+            "mem": f"{mem:.0f}%",
+            "net": net_str,
+            "gpu": f"{gpu:.0f}%" if gpu >= 0 else "N/A",
+            "tmp": f"{tmp:.0f}°C" if tmp >= 0 else "N/A",
+            "batt": f"{self.hud._battery_percent:.0f}%" if self.hud._battery_percent is not None else "N/A",
+            "uptime": uptime,
+            "proc": processes,
+            "os": os_name,
+        }
+        self.hud.update()
 
     def _build_header(self) -> QWidget:
         w = QWidget()
@@ -4072,74 +4013,6 @@ class MainWindow(QMainWindow):
         self._clock_lbl.setText(time.strftime("%H:%M:%S"))
         self._date_lbl.setText(time.strftime("%a %d %b %Y"))
 
-    def _build_left_panel(self) -> QWidget:
-        w = QWidget()
-        w.setFixedWidth(_LEFT_W)
-        w.setStyleSheet("background: transparent; border: none;")
-        lay = QVBoxLayout(w)
-        lay.setContentsMargins(8, 10, 8, 10)
-        lay.setSpacing(6)
-
-        hdr = QLabel("◈ SYS MONITOR")
-        hdr.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
-        hdr.setStyleSheet(f"color: {C.PRI}; background: transparent;")
-        lay.addWidget(hdr)
-        lay.addSpacing(2)
-
-        self._bar_cpu = MetricBar("CPU", C.PRI)
-        self._bar_mem = MetricBar("MEM", C.ACC2)
-        self._bar_net = MetricBar("NET", C.GREEN)
-        self._bar_gpu = MetricBar("GPU", C.ACC)
-        self._bar_tmp = MetricBar("TMP", "#ff6688")
-
-        for bar in [self._bar_cpu, self._bar_mem, self._bar_net,
-                    self._bar_gpu, self._bar_tmp]:
-            lay.addWidget(bar)
-
-        lay.addSpacing(4)
-
-        info_panel = QWidget()
-        info_panel.setStyleSheet("background: transparent; border: none;")
-        ip_lay = QVBoxLayout(info_panel)
-        ip_lay.setContentsMargins(6, 5, 6, 5)
-        ip_lay.setSpacing(3)
-
-        self._uptime_lbl = QLabel("UP  --:--")
-        self._uptime_lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-        self._uptime_lbl.setStyleSheet(f"color: {C.GREEN}; background: transparent; border: none;")
-        ip_lay.addWidget(self._uptime_lbl)
-
-        self._proc_lbl = QLabel("PROC  --")
-        self._proc_lbl.setFont(QFont("Courier New", 8))
-        self._proc_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; border: none;")
-        ip_lay.addWidget(self._proc_lbl)
-
-        os_name = {"Windows": "WIN", "Darwin": "macOS", "Linux": "LINUX"}.get(_OS, _OS.upper())
-        os_lbl = QLabel(f"OS  {os_name}")
-        os_lbl.setFont(QFont("Courier New", 8))
-        os_lbl.setStyleSheet(f"color: {C.ACC2}; background: transparent; border: none;")
-        ip_lay.addWidget(os_lbl)
-
-        lay.addWidget(info_panel)
-        lay.addSpacing(4)
-
-        lay.addStretch()
-
-        for txt, col in [
-            ("AI CORE\nACTIVE",  C.GREEN),
-            ("SEC\nCLEARED",     C.PRI),
-            ("PROTOCOL\n" + APP_PROTOCOL,   C.TEXT_DIM),
-        ]:
-            lbl = QLabel(txt)
-            lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet(
-                f"color: {col}; background: transparent;"
-                "border: none; padding: 4px;"
-            )
-            lay.addWidget(lbl)
-
-        return w
     def _build_right_panel(self) -> QWidget:
         w = QWidget()
         w.setFixedWidth(_RIGHT_W)
@@ -4591,7 +4464,7 @@ class MainWindow(QMainWindow):
         width = max(300, min(650, self._hud_cam_stack.width() - 30))
         height = max(110, min(130, int(self._hud_cam_stack.height() * 0.24)))
         x = origin.x() + (self._hud_cam_stack.width() - width) // 2
-        y = origin.y() + self._hud_cam_stack.height() - height - 10
+        y = origin.y() + self._hud_cam_stack.height() - height - 2
         self._content_panel.setGeometry(x, y, width, height)
 
     def _dismiss_content(self):

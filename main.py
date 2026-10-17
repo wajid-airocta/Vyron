@@ -1263,6 +1263,13 @@ class JarvisLive:
                     _query = args.get("query") or ", ".join(args.get("items", []))
                     _label = f"{_mode.upper()} — {_query[:38]}" if _query else _mode.upper()
                     self.ui.show_content(_label, r)
+                elif (isinstance(r, str) and len(r.strip()) >= 80
+                      and not r.startswith(("Error", "Failed", "No results",
+                                            "Search failed", "Permission denied"))):
+                    # Keep substantial tool detail available on screen while
+                    # VYRON speaks a concise answer. Short action confirmations
+                    # stay in the conversation.
+                    self.ui.show_content(name.replace("_", " ").upper(), r)
 
             else:
                 if self._plugin_registry.has(name):
