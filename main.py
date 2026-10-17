@@ -71,9 +71,9 @@ from actions.proactive         import ProactiveEngine
 from actions.background_monitor import (
     add_monitor, remove_monitor, list_monitors, check_all as monitor_check_all,
 )
-from actions.web_search        import _news as _fetch_news_sync
+from actions.web_search        import _news as _fetch_news_sync, _search as _fetch_lookup_sync
 from memory.config_manager     import (
-    get_brief_enabled, get_media_resolution, get_proactive_audio_enabled,
+    get_brief_enabled, get_startup_content, get_media_resolution, get_proactive_audio_enabled,
     get_push_to_talk_enabled, get_thinking_enabled, get_turn_tuning, get_voice,
     get_wake_word_enabled, save_wake_word_enabled,    get_input_device, get_output_device,
 )
@@ -1210,6 +1210,12 @@ class JarvisLive:
             elif name == "system_status":
                 r = await loop.run_in_executor(None, get_system_status)
                 result = str(r)
+                self.ui.show_content(
+                    "SYSTEM — LIVE METRICS",
+                    f"CPU {r['cpu_percent']}%  ·  Memory {r['ram_percent']}% "
+                    f"({r['ram_used_gb']}/{r['ram_total_gb']} GB)\n"
+                    f"Uptime {r['uptime']}  ·  Processes {r['process_count']}",
+                )
 
             elif name == "manage_monitor":
                 action = args.get("action", "").lower().strip()
@@ -1741,9 +1747,8 @@ class JarvisLive:
         """
         Two-phase briefing optimized for speed:
           Phase 1 — instant greeting (no tools) → speech starts in <1s
-          Phase 2 — news pre-fetched in a background thread while Phase 1 plays,
-                    delivered as ready text (no Gemini tool-call round-trip) and
-                    shown on the UI content panel. Waits for turn_complete event
+          Phase 2 — configured live content is fetched while Phase 1 plays,
+                    then shown as a temporary HUD highlight. Waits for turn_complete event
                     instead of a fixed sleep so there is no unnecessary gap.
         """
         memory   = load_memory()
@@ -1758,9 +1763,14 @@ class JarvisLive:
         name = get_user_name().strip() or _val("name")
         time_str = datetime.now().strftime("%H:%M")
 
-        # Start fetching news immediately — runs in parallel while phase 1 plays
+        # Fetch the selected live content while the greeting plays.
+        mode, topic = get_startup_content()
+        fetch = (get_system_status if mode == "system" else
+                 _fetch_lookup_sync if mode == "lookup" else _fetch_news_sync)
         loop = asyncio.get_event_loop()
-        news_future = loop.run_in_executor(None, _fetch_news_sync, "top world news today")
+        content_future = loop.run_in_executor(None, fetch, *(() if mode == "system" else (topic,)))
+        content_title = ("SYSTEM — LIVE METRICS" if mode == "system" else
+                         f"{'LOOKUP' if mode == 'lookup' else 'NEWS'} — {topic}")
 
         await asyncio.sleep(0.3)
         if not self.session:
@@ -1789,7 +1799,7 @@ class JarvisLive:
             )
 
         p1 = (
-            f"Greet the user warmly, mention it is {time_str}, and say you are fetching today's news now.{session_clause} "
+            f"Greet the user warmly, mention it is {time_str}, and say you are preparing their startup highlight now.{session_clause} "
             f"Keep it to 2 short sentences max. Do not call any tools.{lang_clause}{name_clause}"
         )
 
@@ -1804,15 +1814,15 @@ class JarvisLive:
         print("[JARVIS] Briefing phase 1 (greeting) sent.")
 
         # ── Phase 2: fire as soon as Phase 1 audio is done ───────────────────
-        async def _deliver_news():
+        async def _deliver_content():
             try:
                 lang_str = (f" Speak in {lang} unless the user has since "
                             f"spoken another language, in which case use theirs."
                             if lang else "")
 
-                # Wait for news fetch (already running) and Phase 1 turn-complete
+                # Wait for selected content and Phase 1 turn-complete
                 # in parallel — whichever takes longer determines the wait time
-                news_done   = asyncio.wrap_future(news_future)
+                content_done = asyncio.wrap_future(content_future)
                 turn_waited = False
                 if self._turn_done_event:
                     try:
@@ -1831,46 +1841,45 @@ class JarvisLive:
                     await asyncio.sleep(1.0)
 
                 try:
-                    news_text = await asyncio.wait_for(news_done, timeout=8.0)
+                    content = await asyncio.wait_for(content_done, timeout=8.0)
+                    if mode == "system":
+                        content = (f"CPU {content['cpu_percent']}%  ·  Memory {content['ram_percent']}% "
+                                   f"({content['ram_used_gb']}/{content['ram_total_gb']} GB)\n"
+                                   f"Uptime {content['uptime']}  ·  Processes {content['process_count']}")
+                    else:
+                        content = str(content)
                 except Exception as e:
-                    self.ui.write_log(f"SYS: News fetch timed out/failed: {e!r}")
-                    news_text = ""
+                    self.ui.write_log(f"SYS: Startup highlight failed: {e!r}")
+                    content = ""
 
                 if not self.session:
                     return
 
-                failed = (not news_text) or news_text.startswith(
-                    ("No news found", "Search failed", "Please provide")
+                failed = (not content) or content.startswith(
+                    ("No news found", "No results", "Search failed", "Please provide")
                 )
                 if not failed:
-                    # Show on UI content panel immediately
-                    self.ui.show_content("NEWS — top world news today", news_text)
-
+                    self.ui.show_content(content_title, content)
                     p2 = (
-                        f"[BRIEFING] Here are today's top news headlines:\n{news_text}\n\n"
-                        "Pick ONE headline, summarise it in one sentence, then say the full list "
-                        f"is displayed on screen. Do not call any tools.{lang_str}"
+                        f"[BRIEFING] The on-screen highlight contains {content_title}:\n{content}\n\n"
+                        "Say only one useful observation in a natural sentence. "
+                        f"The detail is on screen; do not recite it. Do not call tools.{lang_str}"
                     )
                 else:
-                    self.ui.write_log(
-                        f"SYS: News unavailable — backend returned: {news_text[:120]!r}"
-                    )
-                    p2 = (
-                        "News headlines could not be fetched right now. "
-                        f"Let the user know briefly.{lang_str}"
-                    )
+                    self.ui.write_log(f"SYS: Startup highlight unavailable: {content[:120]!r}")
+                    p2 = f"The startup highlight is unavailable right now. Say so briefly.{lang_str}"
 
                 await self.session.send_client_content(
                     turns={"role": "user", "parts": [{"text": p2}]},
                     turn_complete=True,
                 )
-                print("[JARVIS] Briefing phase 2 (news) sent.")
+                print("[VYRON] Briefing phase 2 (highlight) sent.")
             except Exception as e:
                 print(f"[Briefing] Phase 2 error: {e}")
                 print(f"[JARVIS] Briefing phase 2 failed: {e}")
-                self.ui.write_log("SYS: Could not fetch the news for the briefing.")
+                self.ui.write_log("SYS: Could not prepare the startup highlight.")
 
-        asyncio.create_task(_deliver_news())
+        asyncio.create_task(_deliver_content())
 
     # ── Session memory ──────────────────────────────────────────────────────────
 

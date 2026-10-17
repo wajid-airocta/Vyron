@@ -743,28 +743,7 @@ class HudCanvas(QWidget):
             p.drawEllipse(QRectF(cx - gr, cy - gr, gr * 2, gr * 2))
         p.setBrush(Qt.BrushStyle.NoBrush)
 
-        # 2. Frame marks at the corners of the whole canvas, not of the circle.
-        #    They are what set the scale: the eye reads the reactor as filling
-        #    the room rather than sitting in the middle of it.
-        if W > 40 and H > 40:
-            m, arm = min(W, H) * 0.035, min(W, H) * 0.055
-            p.setPen(QPen(blend(main, 0.45), 1.4))
-            for sx, sy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
-                x = cx + sx * (W / 2 - m)
-                y = cy + sy * (H / 2 - m)
-                p.drawLine(QLineF(x, y, x - sx * arm, y))
-                p.drawLine(QLineF(x, y, x, y - sy * arm))
-
-        # 3. Crosshair across the full canvas, broken around the core so it
-        #    frames the reactor rather than crossing it.
-        p.setPen(QPen(blend(main, 0.16), 1))
-        gap = r * 0.62
-        if W > 40:
-            p.drawLine(QLineF(cx - W / 2, cy, cx - gap, cy))
-            p.drawLine(QLineF(cx + gap, cy, cx + W / 2, cy))
-        if H > 40:
-            p.drawLine(QLineF(cx, cy - H / 2, cx, cy - gap))
-            p.drawLine(QLineF(cx, cy + gap, cx, cy + H / 2))
+        # The reactor floats directly on the space canvas.
 
         # 4. Two thin outer circles. Sparse on purpose — a dense ring reads as a
         #    grey band at this size, and restraint is what made the original
@@ -3054,7 +3033,7 @@ class MainWindow(QMainWindow):
         self._left_panel = self._build_left_panel()
         body.addWidget(self._left_panel, stretch=0)
 
-        # Center column: HUD + resizable content panel via QSplitter
+        # Center column: HUD and quiz; supplemental content floats over the HUD
         self.hud = HudCanvas(face_path, _display)
         self.hud.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._content_panel = self._build_content_panel()
@@ -3221,7 +3200,6 @@ class MainWindow(QMainWindow):
         self._center_split.setStyleSheet(
             "QSplitter::handle { background: transparent; height: 4px; }")
         self._center_split.addWidget(self._hud_cam_stack)
-        self._center_split.addWidget(self._content_panel)
         self._center_split.addWidget(self._quiz_panel)
         self._center_split.setStretchFactor(0, 3)
         self._center_split.setStretchFactor(1, 1)
@@ -3241,6 +3219,9 @@ class MainWindow(QMainWindow):
         self._update_autostart_btn(self._check_autostart())
         from memory.config_manager import get_brief_enabled as _gbe
         self._update_brief_btn(_gbe())
+        self._content_timer = QTimer(self)
+        self._content_timer.setSingleShot(True)
+        self._content_timer.timeout.connect(self._dismiss_content)
 
         self._clock_tmr = QTimer(self)
         self._clock_tmr.timeout.connect(self._tick_clock)
@@ -3923,6 +3904,8 @@ class MainWindow(QMainWindow):
                 (cw.height() - oh) // 2,
                 ow, oh,
             )
+        if self._content_panel.isVisible():
+            self._position_content_popup()
         # Camera preview — bottom-right corner of the center/HUD area
         pw = _CameraPreview._W
         ph = self._cam_preview.height() or _CameraPreview._H
@@ -4366,6 +4349,32 @@ class MainWindow(QMainWindow):
         self._brief_btn = _row(QPushButton())
         self._brief_btn.clicked.connect(self._toggle_brief)
 
+        from memory.config_manager import get_startup_content
+        mode, topic = get_startup_content()
+        startup_lbl = QLabel("STARTUP HIGHLIGHT")
+        startup_lbl.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent; border: none;")
+        startup_lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        lay.addWidget(startup_lbl)
+        self._startup_mode = QComboBox()
+        for label, value in (("News", "news"), ("Live system data", "system"),
+                             ("Custom lookup", "lookup")):
+            self._startup_mode.addItem(label, value)
+        self._startup_mode.setCurrentIndex(self._startup_mode.findData(mode))
+        self._startup_mode.setStyleSheet(
+            f"background: #001219; color: {C.TEXT}; border: none; padding: 4px;")
+        lay.addWidget(self._startup_mode)
+        self._startup_topic = QLineEdit(topic)
+        self._startup_topic.setPlaceholderText("Topic or live lookup request")
+        self._startup_topic.setToolTip(
+            "News: enter a topic. Custom lookup: enter information to search for at launch.")
+        self._startup_topic.setStyleSheet(
+            f"background: #001219; color: {C.TEXT}; border: none; padding: 4px;")
+        lay.addWidget(self._startup_topic)
+        self._startup_mode.currentIndexChanged.connect(self._refresh_startup_topic)
+        self._refresh_startup_topic()
+        self._startup_save_btn = _row(QPushButton("SAVE STARTUP HIGHLIGHT"), self._BTN_DIM)
+        self._startup_save_btn.clicked.connect(self._save_startup_content)
+
         self._wake_btn = _row(QPushButton())
         self._wake_btn.clicked.connect(self._toggle_wake_word)
         self._wake_sleep_btn = _row(QPushButton())
@@ -4489,21 +4498,24 @@ class MainWindow(QMainWindow):
 
     def _build_content_panel(self) -> QWidget:
         """
-        Collapsible panel below the HUD — shows search results, news, briefings.
-        Hidden by default; appears when show_content() is called.
+        Temporary floating highlight for search results, reviews, and briefings.
+        Hidden by default; shown for one minute by show_content().
         """
-        w = QWidget()
+        w = QWidget(self.centralWidget())
+        w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         w.setObjectName("ContentPanel")
         w.setStyleSheet(f"""
             QWidget#ContentPanel {{
-                background: transparent;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(0, 32, 43, 185), stop:1 rgba(0, 0, 0, 38));
                 border: none;
+                border-radius: 12px;
             }}
         """)
         w.hide()
 
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(12, 7, 12, 8)
+        lay.setContentsMargins(16, 10, 16, 12)
         lay.setSpacing(5)
 
         # ── header row ───────────────────────────────────────────────────────
@@ -4534,17 +4546,13 @@ class MainWindow(QMainWindow):
         dismiss.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; color: {C.TEXT_DIM};
-                border: 1px solid {C.BORDER}; border-radius: 2px; padding: 0 5px;
+                border: none; padding: 0 5px;
             }}
-            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
+            QPushButton:hover {{ color: {C.TEXT}; }}
         """)
-        dismiss.clicked.connect(w.hide)
+        dismiss.clicked.connect(self._dismiss_content)
         hdr.addWidget(dismiss)
         lay.addLayout(hdr)
-
-        # ── separator ─────────────────────────────────────────────────────────
-        sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet(f"color: {C.BORDER};"); lay.addWidget(sep)
 
         # ── text display ──────────────────────────────────────────────────────
         self._content_display = QTextEdit()
@@ -4556,10 +4564,9 @@ class MainWindow(QMainWindow):
         )
         self._content_display.setStyleSheet(f"""
             QTextEdit {{
-                background: {C.DARK};
+                background: transparent;
                 color: {C.TEXT};
-                border: 1px solid {C.BORDER};
-                border-radius: 3px;
+                border: none;
                 padding: 6px 8px;
                 selection-background-color: {C.PRI_GHO};
             }}
@@ -4577,11 +4584,30 @@ class MainWindow(QMainWindow):
 
         return w
 
+    def _position_content_popup(self):
+        """Float the highlight at the foot of the HUD without resizing it."""
+        cw = self.centralWidget()
+        origin = self._hud_cam_stack.mapTo(cw, QPoint(0, 0))
+        width = max(300, min(650, self._hud_cam_stack.width() - 30))
+        height = max(110, min(130, int(self._hud_cam_stack.height() * 0.24)))
+        x = origin.x() + (self._hud_cam_stack.width() - width) // 2
+        y = origin.y() + self._hud_cam_stack.height() - height - 10
+        self._content_panel.setGeometry(x, y, width, height)
+
+    def _dismiss_content(self):
+        self._content_timer.stop()
+        self._content_panel.hide()
+
+    def _reveal_content(self):
+        self._position_content_popup()
+        self._content_panel.show()
+        self._content_panel.raise_()
+        self._content_timer.start(60_000)
+
     def _show_content(self, title: str, text: str):
         """Slot — runs on Qt main thread. Updates and shows the content panel."""
         import time as _time
-        # The panel opens below the head, so the head looks down at it. It is a
-        # tiny thing that answers "did that land?" before you read a word.
+        # Draw attention to new supporting detail without replacing the reply.
         self.hud.glance(0.0, -0.85, hold=1.3)
         self._content_title_lbl.setText(title.upper()[:48])
         self._content_ts_lbl.setText(_time.strftime("%H:%M:%S"))
@@ -4589,11 +4615,7 @@ class MainWindow(QMainWindow):
         self._content_display.moveCursor(
             self._content_display.textCursor().MoveOperation.Start
         )
-        first_show = not self._content_panel.isVisible()
-        self._content_panel.show()
-        if first_show:
-            total = self._center_split.height()
-            self._center_split.setSizes([max(total - 220, 120), 220])
+        self._reveal_content()
 
     # ── document review ──────────────────────────────────────────────────────
     # Rendered as rich text into the content panel that already exists, rather
@@ -4674,11 +4696,7 @@ class MainWindow(QMainWindow):
         self._content_display.setHtml("".join(parts))
         self._content_display.moveCursor(
             self._content_display.textCursor().MoveOperation.Start)
-        first_show = not self._content_panel.isVisible()
-        self._content_panel.show()
-        if first_show:
-            total = self._center_split.height()
-            self._center_split.setSizes([max(total - 260, 120), 260, 0])
+        self._reveal_content()
 
     # ── quiz panel ───────────────────────────────────────────────────────────
     # An interactive twin of the content panel. The plugin only ever hands over
@@ -4808,7 +4826,7 @@ class MainWindow(QMainWindow):
         self._quiz_panel.show()
         if first_show:
             total = self._center_split.height()
-            self._center_split.setSizes([max(total - 250, 120), 0, 250])
+            self._center_split.setSizes([max(total - 250, 120), 250])
         self._quiz_render()
 
     def _hide_quiz(self):
@@ -5119,6 +5137,21 @@ class MainWindow(QMainWindow):
                 }}
                 QPushButton:hover {{ color: {C.TEXT}; border: 1px solid {C.BORDER_B}; }}
             """)
+
+    def _refresh_startup_topic(self):
+        self._startup_topic.setVisible(self._startup_mode.currentData() != "system")
+        if hasattr(self, "_ctrl_drawer"):
+            self._position_ctrl_drawer()
+
+    def _save_startup_content(self):
+        from memory.config_manager import save_startup_content
+        try:
+            save_startup_content(self._startup_mode.currentData(),
+                                 self._startup_topic.text())
+        except ValueError as error:
+            self._startup_save_btn.setText(str(error).upper())
+            return
+        self._startup_save_btn.setText("SAVED FOR NEXT LAUNCH ✓")
 
     def _toggle_brief(self):
         from memory.config_manager import get_brief_enabled, save_brief_enabled
@@ -5889,7 +5922,7 @@ class JarvisUI:
             time.sleep(0.1)
 
     def show_content(self, title: str, text: str):
-        """Thread-safe: display content in the panel below the HUD."""
+        """Thread-safe: show supplemental content as a one-minute HUD highlight."""
         self._win._content_sig.emit(title[:48], text[:4000])
 
     def show_quiz(self, topic: str, questions, grade=None) -> None:
@@ -5910,7 +5943,7 @@ class JarvisUI:
         self._win._quiz_hide_sig.emit()
 
     def show_review(self, title: str, summary: str, findings, unclear=None) -> None:
-        """Thread-safe: lay a document review into the panel below the HUD.
+        """Thread-safe: show a document review in the temporary HUD highlight.
 
         `findings` is a list of {heading, detail, severity, quote, suggestion};
         severity is one of 'serious' / 'caution' / 'note' and decides colour and

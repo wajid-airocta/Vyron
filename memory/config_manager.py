@@ -264,6 +264,30 @@ def _save_flag(key: str, value) -> None:
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
 
+STARTUP_CONTENT_MODES = ("news", "system", "lookup")
+DEFAULT_STARTUP_TOPIC = "top world news today"
+
+
+def get_startup_content() -> tuple[str, str]:
+    """Return the startup popup source and topic, with safe defaults."""
+    config = load_api_keys()
+    mode = str(config.get("startup_content_mode", "news")).strip().lower()
+    if mode not in STARTUP_CONTENT_MODES:
+        mode = "news"
+    topic = str(config.get("startup_content_topic", DEFAULT_STARTUP_TOPIC)).strip()[:160]
+    return mode, topic or DEFAULT_STARTUP_TOPIC
+
+
+def save_startup_content(mode: str, topic: str) -> None:
+    mode = str(mode or "").strip().lower()
+    if mode not in STARTUP_CONTENT_MODES:
+        raise ValueError("Unknown startup content mode")
+    topic = str(topic or "").strip()[:160]
+    if mode != "system" and not topic:
+        raise ValueError("Enter a topic or lookup request")
+    _patch_config(startup_content_mode=mode, startup_content_topic=topic)
+
+
 def get_brief_enabled() -> bool:
     return load_api_keys().get("morning_brief_enabled", True)
 
