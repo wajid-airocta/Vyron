@@ -3383,8 +3383,17 @@ class MainWindow(QMainWindow):
         self._video_split = bool(audio_source)
         self._set_video_muted(bool(muted))
 
-        url = (QUrl.fromLocalFile(source) if Path(source).exists()
-               else QUrl(source))
+        # Stream URLs can exceed the filesystem's filename limit. Identify
+        # remote sources before asking the filesystem about a local file.
+        if "://" in source:
+            url = QUrl(source)
+        else:
+            try:
+                is_local_file = Path(source).is_file()
+            except OSError:
+                is_local_file = False
+            url = (QUrl.fromLocalFile(source) if is_local_file
+                   else QUrl(source))
         self._video_player.setSource(url)
         if self._video_split:
             self._video_sound.setSource(QUrl(audio_source))
