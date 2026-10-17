@@ -43,7 +43,9 @@ final class LiveVoiceSession {
                     + "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
     private static final int INPUT_RATE = 16000;
     private static final int OUTPUT_RATE = 24000;
+    private static final int MAX_RECONNECTS = 5;
     private final Context context;
+    private final Handler main = new Handler(Looper.getMainLooper());
     private final Listener listener;
     private final PhoneTools tools;
     private final String name;
@@ -59,8 +61,10 @@ final class LiveVoiceSession {
     private volatile NoiseSuppressor noiseSuppressor;
     private volatile boolean speakerWriting;
     private volatile long microphoneMutedUntil;
-    private volatile long playbackExpectedEnd;
     private volatile boolean ready;
+    private volatile String apiKey;
+    private volatile String resumeHandle = "";
+    private volatile int reconnects;
     private Thread captureThread;
     private Thread playbackThread;
     private String userWords = "";
@@ -75,16 +79,21 @@ final class LiveVoiceSession {
     }
 
     void start(String key) {
+        apiKey = key;
+        connect();
+    }
+
+    private void connect() {
+        if (!running.get()) return;
+        ready = false;
         listener.onState("CONNECTING");
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            if (running.get() && !ready)
-                fail("Gemini Live did not respond within 15 seconds. Check this phone's connection.");
-        }, 15000);
         Request request = new Request.Builder().url(ENDPOINT + "?key=" +
-                android.net.Uri.encode(key)).build();
-        socket = client.newWebSocket(request, new WebSocketListener() {
+                android.net.Uri.encode(apiKey)).build();
+        WebSocket next = client.newWebSocket(request, new WebSocketListener() {
             @Override public void onOpen(WebSocket ws, Response response) {
-                if (!running.get()) { ws.close(1000, "Stopped"); return; }
+                if (!running.get() || (socket!=null && socket!=ws)) {
+                    ws.close(1000, "Stopped"); return;
+                }
                 listener.onState("AUTHENTICATING");
                 try {
                     String identity = name.isEmpty() ? "" : "The user's name is " + name
@@ -98,6 +107,10 @@ final class LiveVoiceSession {
                             + "Do not claim you executed device or Mac actions unless a tool actually did so.";
                     JSONObject setup = new JSONObject()
                             .put("model", MODEL)
+                            .put("sessionResumption", resumeHandle.isEmpty() ? new JSONObject() :
+                                    new JSONObject().put("handle", resumeHandle))
+                            .put("contextWindowCompression",new JSONObject()
+                                    .put("slidingWindow",new JSONObject()))
                             .put("inputAudioTranscription", new JSONObject())
                             .put("outputAudioTranscription", new JSONObject())
                             .put("tools",new JSONArray().put(new JSONObject()
@@ -114,13 +127,18 @@ final class LiveVoiceSession {
             }
 
             @Override public void onMessage(WebSocket ws, String text) {
-                if (!running.get()) return;
+                if (!running.get() || socket != ws) return;
                 try {
                     JSONObject message = new JSONObject(text);
+                    JSONObject update=message.optJSONObject("sessionResumptionUpdate");
+                    if(update!=null && update.optBoolean("resumable")
+                            && !update.optString("newHandle","").isEmpty())
+                        resumeHandle=update.optString("newHandle");
+                    if(message.has("goAway"))listener.onState("SESSION RENEWING");
                     if (message.has("setupComplete")) {
                         ready = true;
-                        startAudio();
-                        listener.onState("LISTENING");
+                        if(recorder==null)startAudio();
+                        if(running.get())listener.onState("LISTENING");
                     }
                     JSONObject call=message.optJSONObject("toolCall");
                     if(call!=null){
@@ -150,8 +168,7 @@ final class LiveVoiceSession {
                             track.flush();
                             track.play();
                         }
-                        playbackExpectedEnd=SystemClock.elapsedRealtime();
-                        microphoneMutedUntil=playbackExpectedEnd+700;
+                        microphoneMutedUntil=SystemClock.elapsedRealtime()+700;
                     }
                     JSONObject input = content.optJSONObject("inputTranscription");
                     if (input != null && !input.optString("text").isEmpty() && !shouldMuteMicrophone()) {
@@ -180,6 +197,7 @@ final class LiveVoiceSession {
                         }
                     }
                     if (content.optBoolean("turnComplete")) {
+                        reconnects=0;
                         completedTurn = true;
                         listener.onState("LISTENING");
                     }
@@ -192,18 +210,41 @@ final class LiveVoiceSession {
             }
 
             @Override public void onFailure(WebSocket ws, Throwable error, Response response) {
+                if (!running.get() || socket != ws) return;
                 // Never include the authenticated WebSocket URL or key in user-visible errors.
                 int code = response == null ? 0 : response.code();
-                fail(code == 401 || code == 403 ? "Gemini rejected the API key. Check API settings."
-                        : code == 429 ? "Gemini Live quota reached. Try later or use another key."
-                        : code > 0 ? "Gemini Live connection failed (HTTP " + code + ")."
-                        : "Gemini Live connection lost. Check network access.");
+                if(code==401||code==403)fail("Gemini rejected the API key. Check API settings.");
+                else if(code==429)fail("Gemini Live quota reached. Try later or use another key.");
+                else {
+                    if(code==400)resumeHandle="";
+                    reconnect(ws,"Gemini Live connection could not be restored.");
+                }
             }
 
             @Override public void onClosed(WebSocket ws, int code, String reason) {
-                if (running.get()) fail("Gemini Live ended the session (" + code + ").");
+                if (running.get() && socket==ws) {
+                    if(code==1007)resumeHandle="";
+                    reconnect(ws,"Gemini Live ended the session ("+code+").");
+                }
             }
         });
+        socket=next;
+        main.postDelayed(()->{
+            if(running.get() && socket==next && !ready)
+                reconnect(next,"Gemini Live did not respond. Check this phone's connection.");
+        },15000);
+    }
+
+    private synchronized void reconnect(WebSocket failed,String finalMessage){
+        if(!running.get() || socket!=failed)return;
+        socket=null;
+        ready=false;
+        audioQueue.clear();
+        failed.cancel();
+        int attempt=++reconnects;
+        if(attempt>MAX_RECONNECTS){fail(finalMessage);return;}
+        listener.onState("RECONNECTING " + attempt + "/" + MAX_RECONNECTS);
+        main.postDelayed(this::connect,Math.min(8000,500L << Math.min(attempt-1,4)));
     }
 
     boolean isReady() { return ready && running.get(); }
@@ -278,12 +319,25 @@ final class LiveVoiceSession {
 
     private void capture(AudioRecord input) {
         byte[] buffer = new byte[3200]; // 100 ms of 16 kHz mono PCM16
+        long pausedAt=0;
+        boolean pauseSignaled=false;
         while (running.get()) {
             int count = input.read(buffer, 0, buffer.length);
-            if (count <= 0) continue;
-            if (shouldMuteMicrophone()) continue;
+            if(count<0){fail("The microphone stopped. Reopen voice after checking the audio device.");return;}
+            if(count==0)continue;
             WebSocket ws = socket;
-            if (ws == null || ws.queueSize() > 1_000_000) continue;
+            if (ws == null || !ready) { pausedAt=0;pauseSignaled=false;continue; }
+            if(shouldMuteMicrophone()){
+                if(pausedAt==0)pausedAt=SystemClock.elapsedRealtime();
+                if(!pauseSignaled && SystemClock.elapsedRealtime()-pausedAt>1000){
+                    ws.send("{\"realtimeInput\":{\"audioStreamEnd\":true}}");
+                    pauseSignaled=true;
+                }
+                continue;
+            }
+            pausedAt=0;
+            pauseSignaled=false;
+            if (ws.queueSize() > 1_000_000) continue;
             int peak = 0;
             for (int i = 0; i + 1 < count; i += 2) {
                 int value = (short) ((buffer[i] & 255) | (buffer[i + 1] << 8));
@@ -308,16 +362,20 @@ final class LiveVoiceSession {
                     speakerWriting=true;
                     try{
                         int accepted=output.write(bytes, 0, bytes.length, AudioTrack.WRITE_BLOCKING);
+                        if(accepted<0)throw new IllegalStateException("Audio output failed");
                         long now=SystemClock.elapsedRealtime();
                         long duration=accepted>0?accepted*1000L/(OUTPUT_RATE*2):0;
-                        playbackExpectedEnd=Math.max(now,playbackExpectedEnd)+duration;
+                        microphoneMutedUntil=now+duration+700;
                     }finally{
-                        microphoneMutedUntil=playbackExpectedEnd+700;
                         speakerWriting=false;
                     }
                 }
             } catch (InterruptedException ignored) { return; }
-            catch (Exception ignored) { return; }
+            catch (Exception ignored) {
+                audioQueue.clear();
+                fail("The audio output stopped. Reopen voice after checking the audio device.");
+                return;
+            }
         }
     }
 

@@ -36,7 +36,8 @@ import org.json.JSONObject;
 /** Reads the phone information Android actually exposes to a regular app. */
 final class PhoneSystemRepository {
     private static long lastCpuTotal, lastCpuIdle, lastTrafficAt, lastRx, lastTx;
-    private static Double lastCpuPercent, rxPerSecond, txPerSecond;
+    private static long lastAppCpuAt, lastAppCpuTime;
+    private static Double lastCpuPercent, appCpuPercent, rxPerSecond, txPerSecond;
     private PhoneSystemRepository() {}
 
     static boolean hasUsageAccess(Context context) {
@@ -78,7 +79,16 @@ final class PhoneSystemRepository {
             out.put("system_cpu_percent",cpu==null?JSONObject.NULL:Math.round(cpu));
             out.put("vyron_process_id",Process.myPid());
             out.put("vyron_process_memory_mb",Math.round(Debug.getPss()/1024.0));
-            out.put("vyron_cpu_time_seconds",Process.getElapsedCpuTime()/1000);
+            long appCpuTime=Process.getElapsedCpuTime();
+            long appCpuAt=SystemClock.elapsedRealtime();
+            out.put("vyron_cpu_time_seconds",appCpuTime/1000);
+            if(lastAppCpuAt>0 && appCpuAt>lastAppCpuAt){
+                appCpuPercent=100.0*(appCpuTime-lastAppCpuTime)
+                        /((appCpuAt-lastAppCpuAt)*Math.max(1,Runtime.getRuntime().availableProcessors()));
+                appCpuPercent=Math.max(0,Math.min(100,appCpuPercent));
+            }
+            lastAppCpuAt=appCpuAt;lastAppCpuTime=appCpuTime;
+            out.put("vyron_cpu_percent",appCpuPercent==null?JSONObject.NULL:round1(appCpuPercent));
             out.put("uptime_minutes",SystemClock.elapsedRealtime()/60000);
             ActivityManager manager=(ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
             if(manager!=null){
@@ -106,8 +116,8 @@ final class PhoneSystemRepository {
                 int level=battery.getIntExtra(BatteryManager.EXTRA_LEVEL,-1);
                 int scale=battery.getIntExtra(BatteryManager.EXTRA_SCALE,100);
                 out.put("battery_percent",level<0||scale<=0?JSONObject.NULL:level*100/scale);
-                out.put("battery_temperature_c",round1(battery.getIntExtra(
-                        BatteryManager.EXTRA_TEMPERATURE,0)/10.0));
+                int temperature=battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE,-1);
+                out.put("battery_temperature_c",temperature<0?JSONObject.NULL:round1(temperature/10.0));
                 out.put("battery_voltage_mv",battery.getIntExtra(BatteryManager.EXTRA_VOLTAGE,0));
                 int status=battery.getIntExtra(BatteryManager.EXTRA_STATUS,-1);
                 out.put("charging",status==BatteryManager.BATTERY_STATUS_CHARGING

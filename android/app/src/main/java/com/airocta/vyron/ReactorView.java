@@ -1,16 +1,17 @@
 package com.airocta.vyron;
 
-import android.app.ActivityManager;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
-import android.os.BatteryManager;
 import android.os.SystemClock;
 import android.view.View;
+import java.util.Locale;
 import java.util.Random;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /** A borderless phone HUD: live device readings on rings around the voice reactor. */
 final class ReactorView extends View {
@@ -20,20 +21,17 @@ final class ReactorView extends View {
     private static final int DIM = Color.rgb(38, 76, 87);
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Random stars = new Random(1494);
-    private final ActivityManager activity;
-    private final BatteryManager battery;
+    private final Context appContext;
     private final long started = SystemClock.uptimeMillis();
+    private JSONObject readings = new JSONObject();
+    private boolean sampling;
     private String state = "READY";
     private float micLevel;
-    private int memoryPercent;
-    private int batteryPercent;
-    private long freeMemoryGb;
     private long lastSample;
 
     ReactorView(Context context) {
         super(context);
-        activity = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-        battery = (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE);
+        appContext = context.getApplicationContext();
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         sample();
     }
@@ -42,84 +40,114 @@ final class ReactorView extends View {
     void setMicLevel(float level) { micLevel = micLevel * .72f + level * .28f; invalidate(); }
 
     private void sample() {
+        if (sampling) return;
+        sampling = true;
         lastSample = SystemClock.uptimeMillis();
-        if (activity != null) {
-            ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
-            activity.getMemoryInfo(info);
-            if (info.totalMem > 0) {
-                memoryPercent = (int) ((info.totalMem - info.availMem) * 100 / info.totalMem);
-                freeMemoryGb = Math.round(info.availMem / 1073741824.0);
-            }
-        }
-        if (battery != null) batteryPercent = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+        new Thread(() -> {
+            JSONObject next = PhoneSystemRepository.snapshot(appContext);
+            post(() -> { readings = next; sampling = false; invalidate(); });
+        }, "vyron-reactor-metrics").start();
     }
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        if (SystemClock.uptimeMillis() - lastSample > 5000) sample();
+        if (SystemClock.uptimeMillis() - lastSample > 3000) sample();
         float width = getWidth(), height = getHeight();
         if (width <= 0 || height <= 0) return;
         float density = getResources().getDisplayMetrics().density;
-        float cx = width / 2, cy = height * .48f;
-        float radius = Math.min(width * .425f, height * .33f);
+        float cx = width / 2, cy = height * .5f;
+        float radius = Math.min(width * .30f, height * .30f);
+        float labelRadius = radius + 35 * density;
         long age = SystemClock.uptimeMillis() - started;
         float spin = (age % 60000) * 360f / 60000f;
+        JSONObject data = readings;
         canvas.drawColor(Color.BLACK);
         stars.setSeed(1494);
-        for (int i = 0; i < 72; i++) {
+        for (int i = 0; i < 68; i++) {
             float x = stars.nextFloat() * width;
             float y = stars.nextFloat() * height;
-            float phase = (float) Math.sin(age / 1800f + i * .9f);
-            paint.setColor(Color.argb(18 + (int) (16 * (phase + 1)), 60, 171, 195));
+            float phase = (float) Math.sin(age / 2000f + i * .87f);
+            paint.setColor(Color.argb(13 + (int) (12 * (phase + 1)), 52, 155, 180));
             paint.setStyle(Paint.Style.FILL);
-            canvas.drawCircle(x, y, (i % 7 == 0 ? 1.1f : .55f) * density, paint);
+            canvas.drawCircle(x, y, (i % 7 == 0 ? 1f : .5f) * density, paint);
         }
         for (int i = 0; i < 4; i++) {
-            float r = radius - i * 14 * density;
-            paint.setColor(i == 0 ? Color.rgb(13, 100, 119) : DIM);
-            paint.setStrokeWidth(i == 0 ? 1.5f * density : .8f * density);
+            float r = radius - i * 12 * density;
+            paint.setColor(i == 0 ? Color.rgb(13, 107, 128) : DIM);
+            paint.setStrokeWidth(i == 0 ? 1.5f * density : .7f * density);
             paint.setStyle(Paint.Style.STROKE);
             canvas.drawCircle(cx, cy, r, paint);
         }
-        paint.setStrokeWidth(1.1f * density);
         for (int i = 0; i < 72; i++) {
             float a = (float) Math.toRadians(i * 5 + spin * .08f);
-            float inner = radius - ((i % 6 == 0) ? 10 : 5) * density;
+            float inner = radius - ((i % 6 == 0) ? 9 : 4) * density;
             paint.setColor(i % 6 == 0 ? CYAN : BLUE);
+            paint.setStrokeWidth(i % 6 == 0 ? 1.2f * density : .7f * density);
             canvas.drawLine(cx + (float) Math.cos(a) * inner,
                     cy + (float) Math.sin(a) * inner,
                     cx + (float) Math.cos(a) * radius,
                     cy + (float) Math.sin(a) * radius, paint);
         }
-        drawProgress(canvas, cx, cy, radius - 24 * density, memoryPercent / 100f,
-                CYAN, -88, 265, 3.3f * density);
-        drawProgress(canvas, cx, cy, radius - 37 * density,
-                Math.max(0, batteryPercent) / 100f, GREEN, 90, 240, 3 * density);
+        float cpu = percent(data, "system_cpu_percent");
+        boolean appCpu = Float.isNaN(cpu);
+        if(appCpu)cpu=percent(data,"vyron_cpu_percent");
+        float mem = percent(data, "ram_used_percent");
+        float battery = percent(data, "battery_percent");
+        float available = (float) data.optDouble("storage_available_gb", Double.NaN);
+        float total = (float) data.optDouble("storage_total_gb", Double.NaN);
+        float storage = Float.isNaN(available) || total <= 0 ? Float.NaN : 1 - available / total;
+        float down = (float) data.optDouble("network_receive_kb_per_second", Double.NaN);
+        float link = (float) data.optDouble("link_downstream_estimate_mbps", Double.NaN);
+        float net = Float.isNaN(down) || Float.isNaN(link) || link <= 0
+                ? Float.NaN : down / (link * 125);
+        float temperature = (float) data.optDouble("battery_temperature_c", Double.NaN);
+        drawProgress(canvas, cx, cy, radius + 7 * density, cpu, CYAN, -107, 29, 3 * density);
+        drawProgress(canvas, cx, cy, radius + 7 * density, mem, Color.rgb(255,145,24), -65, 29, 3 * density);
+        drawProgress(canvas, cx, cy, radius + 7 * density, net, GREEN, -22, 29, 3 * density);
+        drawProgress(canvas, cx, cy, radius + 7 * density,
+                Float.isNaN(temperature) ? Float.NaN : temperature / 60f,
+                Color.rgb(255,93,153), 55, 29, 3 * density);
+        drawProgress(canvas, cx, cy, radius + 7 * density, battery, BLUE, 92, 29, 3 * density);
+        drawProgress(canvas, cx, cy, radius * .57f, storage, GREEN, 0, 360, 2.5f * density);
         paint.setColor(Color.rgb(0, 157, 178));
-        paint.setStrokeWidth(2 * density);
-        RectF inner = new RectF(cx - radius * .49f, cy - radius * .49f,
-                cx + radius * .49f, cy + radius * .49f);
+        paint.setStrokeWidth(1.6f * density);
+        RectF inner = new RectF(cx - radius * .51f, cy - radius * .51f,
+                cx + radius * .51f, cy + radius * .51f);
         canvas.drawArc(inner, spin - 90, 85, false, paint);
         canvas.drawArc(inner, spin + 100, 70, false, paint);
         paint.setColor(Color.argb(75, 0, 154, 174));
         paint.setStyle(Paint.Style.FILL);
-        canvas.drawCircle(cx, cy, radius * .38f + micLevel * 6 * density, paint);
+        canvas.drawCircle(cx, cy, radius * .39f + micLevel * 5 * density, paint);
         paint.setColor(Color.BLACK);
-        canvas.drawCircle(cx, cy, radius * .33f, paint);
-        drawText(canvas, "VYRON", cx, cy - 13 * density, 22 * density, CYAN, true);
-        drawText(canvas, state, cx, cy + 12 * density, 11 * density,
-                "SPEAKING".equals(state) ? GREEN : Color.rgb(172, 232, 239), true);
-        drawText(canvas, "MEMORY", cx - radius * .63f, cy - radius * .94f,
-                9 * density, Color.rgb(121, 194, 210), true);
-        drawText(canvas, memoryPercent + "%", cx - radius * .63f, cy - radius * .79f,
-                13 * density, CYAN, true);
-        drawText(canvas, "BATTERY", cx + radius * .65f, cy + radius * .82f,
-                9 * density, Color.rgb(121, 194, 210), true);
-        drawText(canvas, batteryPercent < 0 ? "N/A" : batteryPercent + "%",
-                cx + radius * .65f, cy + radius * .97f, 13 * density, GREEN, true);
-        drawText(canvas, freeMemoryGb + " GB FREE", cx, cy + radius + 26 * density,
-                10 * density, Color.rgb(105, 191, 203), true);
-        postInvalidateDelayed(60);
+        canvas.drawCircle(cx, cy, radius * .35f, paint);
+        String storageText = Float.isNaN(available) ? "N/A" :
+                (available >= 10 ? String.format(Locale.US, "%.0f", available) :
+                        String.format(Locale.US, "%.1f", available)) + " GB";
+        drawText(canvas, storageText, cx, cy - 2 * density,
+                Math.min(19 * density, radius * .18f), Color.rgb(188,234,238), true);
+        drawText(canvas, "SPACE FREE", cx, cy + 15 * density, 8 * density, CYAN, true);
+        drawText(canvas, state, cx, cy + 29 * density, 8 * density, GREEN, true);
+
+        drawMetric(canvas, cx, cy, labelRadius, -90, appCpu ? "APP CPU" : "CPU",
+                Float.isNaN(cpu) ? "N/A" : Math.round(cpu * 100) + "%", CYAN, density);
+        drawMetric(canvas, cx, cy, labelRadius, -48, "MEM",
+                Float.isNaN(mem) ? "N/A" : Math.round(mem * 100) + "%", Color.rgb(255,145,24), density);
+        drawMetric(canvas, cx, cy, labelRadius, -5, "NET", rate(down), GREEN, density);
+        drawMetric(canvas, cx, cy, labelRadius, 35, "GPU", "N/A", BLUE, density);
+        drawMetric(canvas, cx, cy, labelRadius, 72, "BATT TEMP",
+                Float.isNaN(temperature) ? "N/A" : String.format(Locale.US, "%.1f°C", temperature),
+                Color.rgb(255,93,153), density);
+        drawMetric(canvas, cx, cy, labelRadius, 108, "BATT",
+                Float.isNaN(battery) ? "N/A" : Math.round(battery * 100) + "%", BLUE, density);
+        long uptime = data.optLong("uptime_minutes", -1);
+        drawMetric(canvas, cx, cy, labelRadius, 148, "UPTIME",
+                uptime < 0 ? "N/A" : uptime / 60 + "h " + uptime % 60 + "m", GREEN, density);
+        JSONArray visible = data.optJSONArray("processes_visible_to_app");
+        drawMetric(canvas, cx, cy, labelRadius, 190, "PROC",
+                visible == null ? "N/A" : visible.length() + " VIS", CYAN, density);
+        drawMetric(canvas, cx, cy, labelRadius, 230, "OS",
+                "Android " + data.optString("android_version", "?"), Color.rgb(255,193,0), density);
+        postInvalidateDelayed(70);
     }
 
     private void drawProgress(Canvas canvas, float cx, float cy, float radius, float progress,
@@ -130,8 +158,35 @@ final class ReactorView extends View {
         paint.setStrokeCap(Paint.Cap.ROUND);
         paint.setColor(DIM);
         canvas.drawArc(bounds, start, sweep, false, paint);
+        if (!Float.isNaN(progress)) {
+            paint.setColor(color);
+            canvas.drawArc(bounds, start, sweep * Math.max(0, Math.min(1, progress)), false, paint);
+        }
+    }
+
+    private static float percent(JSONObject data, String key) {
+        if (!data.has(key) || data.isNull(key)) return Float.NaN;
+        return Math.max(0, Math.min(1, (float) data.optDouble(key) / 100f));
+    }
+
+    private static String rate(float kb) {
+        if (Float.isNaN(kb)) return "N/A";
+        if (kb >= 1024) return String.format(Locale.US, "%.1fMB/s", kb / 1024f);
+        return String.format(Locale.US, "%.0fKB/s", kb);
+    }
+
+    private void drawMetric(Canvas canvas, float cx, float cy, float radius, float angle,
+                            String label, String value, int color, float dp) {
+        float radians = (float) Math.toRadians(angle);
+        float x = cx + (float) Math.cos(radians) * radius;
+        float y = cy + (float) Math.sin(radians) * radius;
+        drawText(canvas, label, x, y - 4 * dp, 8.5f * dp, Color.rgb(115,185,204), true);
+        drawText(canvas, value, x, y + 11 * dp, 12.5f * dp, color, true);
+        paint.setStyle(Paint.Style.FILL);
         paint.setColor(color);
-        canvas.drawArc(bounds, start, sweep * Math.max(0, Math.min(1, progress)), false, paint);
+        float marker = radius - 17 * dp;
+        canvas.drawCircle(cx + (float) Math.cos(radians) * marker,
+                cy + (float) Math.sin(radians) * marker, 1.4f * dp, paint);
     }
 
     private void drawText(Canvas canvas, String text, float x, float y, float size,
