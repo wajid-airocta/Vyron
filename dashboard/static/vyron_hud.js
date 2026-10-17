@@ -23,30 +23,33 @@
   `;
   body.insertBefore(stage, feed);
   stage.appendChild(feed);
+  const chatHeading = document.createElement('h2');
+  chatHeading.textContent = 'CONVERSATION';
+  feed.prepend(chatHeading);
   const nav = document.createElement('nav');
   nav.className = 'vy-nav';
-  nav.setAttribute('aria-label','VYRON views');
-  nav.innerHTML = `<button data-view="settings" aria-label="Settings">⚙<small>SETTINGS</small></button><button data-view="calendar" aria-label="Calendar">▦<small>CALENDAR</small></button><button data-view="music" aria-label="Media">♫<small>MEDIA</small></button><button data-view="news" aria-label="News">▤<small>NEWS</small></button><button data-view="apps" aria-label="Apps">⊞<small>APPS</small></button>`;
-  body.insertBefore(nav, footer);
-  const finger = document.createElement('button');
-  finger.className='vy-finger'; finger.type='button'; finger.title='System core'; finger.setAttribute('aria-label','System core'); finger.textContent='◎';
-  body.insertBefore(finger, nav);
-  const ticker = document.createElement('div'); ticker.className='vy-ticker'; ticker.id='vy-ticker'; ticker.textContent='VYRON · Waiting for live system data'; body.insertBefore(ticker, finger);
+  nav.setAttribute('aria-label', 'Jump to dashboard section');
+  nav.innerHTML = '<button data-view="home" aria-label="System core">◎<small>CORE</small></button><button data-view="weather" aria-label="Weather">☼<small>WEATHER</small></button><button data-view="calendar" aria-label="Calendar">▦<small>CALENDAR</small></button><button data-view="music" aria-label="Media">♫<small>MEDIA</small></button><button data-view="news" aria-label="News">▤<small>NEWS</small></button><button data-view="chat" aria-label="Conversation">◈<small>CHAT</small></button><button data-view="apps" aria-label="Apps">⊞<small>APPS</small></button><button data-view="settings" aria-label="Settings">⚙<small>SETTINGS</small></button>';
+  body.insertBefore(nav, stage);
+  const ticker = document.createElement('div');
+  ticker.className = 'vy-ticker';
+  ticker.id = 'vy-ticker';
+  ticker.textContent = 'VYRON · Waiting for live system data';
+  body.insertBefore(ticker, footer);
   const $ = id => document.getElementById(id);
   let current = 'home', latest = null, lastWeather = null;
-  const titles={home:'SYSTEM CORE',chat:'VYRON CHAT',weather:'WEATHER',calendar:'CALENDAR',music:'MEDIA',news:'NEWS TODAY',apps:'APPLICATIONS',settings:'SETTINGS'};
-  function view(name){
-    current=name; $('vy-title').textContent=titles[name]||name.toUpperCase();
-    $('vy-hero').style.display=name==='home'?'grid':'none'; $('vy-meters').style.display=name==='home'?'flex':'none';
-    $('vy-overview').classList.toggle('active',name==='home');
-    for(const key of ['weather','calendar','music','news','apps','settings']) $("vy-"+key).classList.toggle('active',name===key);
-    feed.classList.toggle('active',name==='chat');
-    nav.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.view===name));
-    if(name==='calendar') drawCalendar(); if(name==='music') loadTracks(); if(name==='news') loadNews();
-    if(name==='weather' && !lastWeather) loadSavedWeather();
+  const sectionTargets = {home:'vy-hero',chat:'feed',weather:'vy-weather',calendar:'vy-calendar',music:'vy-music',news:'vy-news',apps:'vy-apps',settings:'vy-settings'};
+  function view(name, scroll = true) {
+    current = name;
+    nav.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.view === name));
+    if (name === 'calendar') drawCalendar();
+    if (name === 'music') loadTracks();
+    if (name === 'news') loadNews();
+    if (name === 'weather' && !lastWeather) loadSavedWeather();
+    const target = $(sectionTargets[name]);
+    if (scroll && target) target.scrollIntoView({behavior:'smooth', block:'start'});
   }
-  document.addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)view(b.dataset.view)});
-  finger.addEventListener('click',()=>view('home'));
+  document.addEventListener('click', e => { const b = e.target.closest('button[data-view]'); if (b) view(b.dataset.view); });
   document.querySelectorAll('[data-shortcut]').forEach(b=>b.addEventListener('click',()=>{
     const action=b.dataset.shortcut;
     if(action==='chat'){view('chat');$('inp').focus()}
@@ -117,5 +120,10 @@
   $('vy-event-date').value=new Date().toLocaleDateString('en-CA');$('vy-event-add').addEventListener('click',()=>{const date=$('vy-event-date').value,text=$('vy-event-text').value.trim();if(!date||!text)return;const list=events();list.push({date,text});localStorage.setItem('vyron_events',JSON.stringify(list));$('vy-event-text').value='';drawCalendar()});
   async function loadTracks(){const box=$('vy-tracks');box.textContent='Loading your audio files…';try{const r=await _authFetch('/api/files');const d=await r.json();const files=d.files.filter(f=>/\.(mp3|m4a|wav|ogg|flac|aac)$/i.test(f.name));box.replaceChildren();if(!files.length){box.textContent='No audio files shared yet. Use ADD AUDIO.';return}for(const file of files){const row=document.createElement('div');row.className='row';const label=document.createElement('strong');label.textContent=file.name;const play=document.createElement('button');play.textContent='PLAY';play.onclick=()=>{const p=$('vy-player');p.src=`/uploads/${encodeURIComponent(file.name)}?token=${encodeURIComponent(_authToken)}`;p.play()};row.append(label,play);box.append(row)}}catch{box.textContent='Media files unavailable while the Mac is disconnected.'}}
   async function loadNews(){const box=$('vy-headlines');box.textContent='Loading live headlines…';try{const r=await _authFetch('/api/news');if(!r.ok)throw Error();const d=await r.json();box.replaceChildren();for(const story of d.stories){const row=document.createElement('div');row.className='row';const a=document.createElement('a');a.href=story.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=story.title;row.append(a);const small=document.createElement('small');small.textContent=story.published||story.source;row.append(small);box.append(row)}if(!d.stories.length)box.textContent='No current headlines.'}catch{box.textContent='News unavailable. Check the network connection.'}}
-  view('home');
+  // Every section is visible on the same canvas, so load its data at startup.
+  drawCalendar();
+  loadTracks();
+  loadNews();
+  loadSavedWeather();
+  view('home', false);
 })();

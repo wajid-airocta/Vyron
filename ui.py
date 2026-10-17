@@ -94,9 +94,9 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
 class C:
-    BG        = "#00060a"
-    PANEL     = "#010d14"
-    PANEL2    = "#010f18"
+    BG        = "#000000"
+    PANEL     = "#000000"
+    PANEL2    = "#000000"
     BORDER    = "#16465b"
     BORDER_B  = "#286e86"
     BORDER_A  = "#225a75"
@@ -113,8 +113,8 @@ class C:
     TEXT_DIM  = "#73bfce"
     TEXT_MED  = "#5ab8cc"
     WHITE     = "#d8f8ff"
-    DARK      = "#000d14"
-    BAR_BG    = "#011520"
+    DARK      = "#000000"
+    BAR_BG    = "#000000"
 
 
 # Keys tied to the accent colour — status colours (ACC, GREEN, RED…) stay fixed
@@ -202,6 +202,27 @@ def retheme_all_widgets(old: dict[str, str], new: dict[str, str]) -> None:
 
 def qcol(h: str, a: int = 255) -> QColor:
     c = QColor(h); c.setAlpha(a); return c
+
+
+
+def _space_stars(seed: int, count: int):
+    rng = random.Random(seed)
+    return [(rng.random(), rng.random(), rng.uniform(.00004, .00016),
+             rng.uniform(.45, 1.15), rng.randint(24, 58))
+            for _ in range(count)]
+
+
+def _paint_space_stars(painter: QPainter, width: int, height: int,
+                       stars, elapsed: float) -> None:
+    if width <= 0 or height <= 0:
+        return
+    painter.setPen(Qt.PenStyle.NoPen)
+    for x, y, speed, radius, alpha in stars:
+        twinkle = .78 + .22 * math.sin(elapsed * .55 + x * 21)
+        painter.setBrush(QBrush(qcol(C.PRI, int(alpha * twinkle))))
+        painter.drawEllipse(QPointF(((x + elapsed * speed) % 1) * width,
+                                    ((y - elapsed * speed * .45) % 1) * height),
+                            radius, radius)
 
 
 # ── Windows GPU via NVML DLL (no subprocess, no console window) ──────────────
@@ -449,10 +470,8 @@ class HudCanvas(QWidget):
         # Rescaled-face cache: the smooth rescale is expensive, so we keep the
         # last result and only rebuild it when the (quantised) size changes.
 
-        # Static grid-dot layer, pre-rendered once per size/theme into a pixmap
-        # so paintEvent blits it in one call instead of thousands of drawPoint()s.
-        self._grid_cache: QPixmap | None = None
-        self._grid_key = None
+        self._space_stars = _space_stars(418, 72)
+        self._space_started = time.monotonic()
         # Repaint throttle counter (idle frames drop to ~20 Hz — see _step()).
         self._paint_tick = 0
 
@@ -546,20 +565,6 @@ class HudCanvas(QWidget):
             lv = 1.0
         if lv > self._live_amp:
             self._live_amp = lv
-
-    def _make_grid(self, W: int, H: int) -> QPixmap:
-        """Pre-render the static grid-dot background into a transparent pixmap so
-        paintEvent can blit it once per frame instead of running a nested
-        drawPoint() loop across the whole widget every 16 ms."""
-        pm = QPixmap(max(1, W), max(1, H))
-        pm.fill(Qt.GlobalColor.transparent)
-        gp = QPainter(pm)
-        gp.setPen(QPen(qcol(C.PRI_GHO), 1))
-        for x in range(0, W, 48):
-            for y in range(0, H, 48):
-                gp.drawPoint(x, y)
-        gp.end()
-        return pm
 
     def _step(self):
         self._tick += 1
@@ -854,13 +859,8 @@ class HudCanvas(QWidget):
         cx, cy = W / 2, H / 2
         fw = min(W, H)
 
-        # grid dots — blitted from a cached layer; rebuilt only when the size
-        # or the theme's ghost colour changes (so live re-theming still works).
-        _gkey = (W, H, C.PRI_GHO)
-        if self._grid_cache is None or self._grid_key != _gkey:
-            self._grid_cache = self._make_grid(W, H)
-            self._grid_key   = _gkey
-        p.drawPixmap(0, 0, self._grid_cache)
+        _paint_space_stars(p, W, H, self._space_stars,
+                           time.monotonic() - self._space_started)
 
         # ── holographic head ────────────────────────────────────────────────
         # Sized to the band between the top of the canvas and the status line,
@@ -992,19 +992,13 @@ class MetricBar(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
 
-        p.setBrush(QBrush(qcol(C.PANEL2)))
-        p.setPen(QPen(qcol(C.BORDER_A), 1))
-        p.drawRoundedRect(QRectF(1, 1, W - 2, H - 2), 4, 4)
-
         bar_h   = 4
         bar_y   = H - bar_h - 5
         bar_w   = W - 12
         bar_x   = 6
         fill_w  = int(bar_w * self._value / 100)
 
-        p.setBrush(QBrush(qcol(C.BAR_BG)))
         p.setPen(Qt.PenStyle.NoPen)
-        p.drawRoundedRect(QRectF(bar_x, bar_y, bar_w, bar_h), 2, 2)
 
         if self._value > 85:
             bar_col = qcol(C.RED)
@@ -1040,10 +1034,9 @@ class LogWidget(QTextEdit):
         self.setFont(QFont("Courier New", 9))
         self.setStyleSheet(f"""
             QTextEdit {{
-                background: {C.PANEL};
+                background: transparent;
                 color: {C.TEXT};
-                border: 1px solid {C.BORDER};
-                border-radius: 4px;
+                border: none;
                 padding: 6px;
                 selection-background-color: {C.PRI_GHO};
             }}
@@ -1257,10 +1250,6 @@ class _DropCanvas(QWidget):
         pad  = 6
         rect = QRectF(pad, pad, W - pad * 2, H - pad * 2)
 
-        bg_col = qcol("#001a24" if z._drag_over else ("#001218" if z._hovering else C.PANEL))
-        p.setBrush(QBrush(bg_col)); p.setPen(Qt.PenStyle.NoPen)
-        p.drawRoundedRect(rect, 6, 6)
-
         if z._current_file:   border_col = qcol(C.GREEN, 200)
         elif z._drag_over:    border_col = qcol(C.PRI, 230)
         elif z._hovering:     border_col = qcol(C.BORDER_B, 200)
@@ -1269,7 +1258,8 @@ class _DropCanvas(QWidget):
         pen = QPen(border_col, 1.5, Qt.PenStyle.DashLine)
         pen.setDashOffset(z._dash_offset)
         p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(rect, 6, 6)
+        if z._drag_over:
+            p.drawRoundedRect(rect, 6, 6)
 
         if z._current_file:   self._paint_file(p, W, H)
         elif z._drag_over:    self._paint_drag_over(p, W, H)
@@ -2965,6 +2955,27 @@ class RemoteKeyOverlay(QWidget):
         self.closed.emit()
 
 
+
+class SpaceCanvas(QWidget):
+    """Black main surface with sparse, slowly drifting stars behind the HUD."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._stars = _space_stars(106, 126)
+        self._started = time.monotonic()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.update)
+        self._timer.start(100)
+
+    def paintEvent(self, _):
+        painter = QPainter(self)
+        if not painter.isActive():
+            return
+        painter.fillRect(self.rect(), Qt.GlobalColor.black)
+        _paint_space_stars(painter, self.width(), self.height(),
+                           self._stars, time.monotonic() - self._started)
+        painter.end()
+
 class MainWindow(QMainWindow):
     _log_sig        = pyqtSignal(str)
     _state_sig      = pyqtSignal(str)
@@ -3028,8 +3039,7 @@ class MainWindow(QMainWindow):
         self._remote_overlay: RemoteKeyOverlay | None = None
         self._customize_overlay: CustomizeOverlay | None = None
 
-        central = QWidget()
-        central.setStyleSheet(f"background: {C.BG};")
+        central = SpaceCanvas()
         self.setCentralWidget(central)
 
         root = QVBoxLayout(central)
@@ -3208,15 +3218,8 @@ class MainWindow(QMainWindow):
         self._hud_cam_stack.addWidget(self._video_cont)
 
         self._center_split = QSplitter(Qt.Orientation.Vertical)
-        self._center_split.setStyleSheet(f"""
-            QSplitter::handle {{
-                background: {C.BORDER};
-                height: 4px;
-            }}
-            QSplitter::handle:hover {{
-                background: {C.PRI_DIM};
-            }}
-        """)
+        self._center_split.setStyleSheet(
+            "QSplitter::handle { background: transparent; height: 4px; }")
         self._center_split.addWidget(self._hud_cam_stack)
         self._center_split.addWidget(self._content_panel)
         self._center_split.addWidget(self._quiz_panel)
@@ -4002,7 +4005,7 @@ class MainWindow(QMainWindow):
     def _build_header(self) -> QWidget:
         w = QWidget()
         w.setFixedHeight(68)
-        w.setStyleSheet(f"background: {C.DARK}; border-bottom: 1px solid {C.BORDER_B};")
+        w.setStyleSheet("background: transparent; border: none;")
         lay = QHBoxLayout(w)
         lay.setContentsMargins(16, 0, 16, 0)
 
@@ -4022,7 +4025,7 @@ class MainWindow(QMainWindow):
         self._drawer_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; color: {C.TEXT_DIM};
-                border: 1px solid {C.BORDER}; border-radius: 4px;
+                border: none;
             }}
             QPushButton:hover {{ color: {C.PRI}; border-color: {C.PRI_DIM}; }}
             QPushButton:checked {{ color: {C.PRI}; border-color: {C.PRI}; background: {C.PRI_GHO}; }}
@@ -4089,15 +4092,14 @@ class MainWindow(QMainWindow):
     def _build_left_panel(self) -> QWidget:
         w = QWidget()
         w.setFixedWidth(_LEFT_W)
-        w.setStyleSheet(f"background: {C.DARK}; border-right: 1px solid {C.BORDER};")
+        w.setStyleSheet("background: transparent; border: none;")
         lay = QVBoxLayout(w)
         lay.setContentsMargins(8, 10, 8, 10)
         lay.setSpacing(6)
 
         hdr = QLabel("◈ SYS MONITOR")
         hdr.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
-        hdr.setStyleSheet(f"color: {C.PRI}; background: transparent; "
-                          f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 4px;")
+        hdr.setStyleSheet(f"color: {C.PRI}; background: transparent;")
         lay.addWidget(hdr)
         lay.addSpacing(2)
 
@@ -4114,9 +4116,7 @@ class MainWindow(QMainWindow):
         lay.addSpacing(4)
 
         info_panel = QWidget()
-        info_panel.setStyleSheet(
-            f"background: {C.PANEL2}; border: 1px solid {C.BORDER}; border-radius: 4px;"
-        )
+        info_panel.setStyleSheet("background: transparent; border: none;")
         ip_lay = QVBoxLayout(info_panel)
         ip_lay.setContentsMargins(6, 5, 6, 5)
         ip_lay.setSpacing(3)
@@ -4151,8 +4151,8 @@ class MainWindow(QMainWindow):
             lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
-                f"color: {col}; background: {C.PANEL2};"
-                f"border: 1px solid {C.BORDER_A}; border-radius: 3px; padding: 4px;"
+                f"color: {col}; background: transparent;"
+                "border: none; padding: 4px;"
             )
             lay.addWidget(lbl)
 
@@ -4160,7 +4160,7 @@ class MainWindow(QMainWindow):
     def _build_right_panel(self) -> QWidget:
         w = QWidget()
         w.setFixedWidth(_RIGHT_W)
-        w.setStyleSheet(f"background: {C.DARK}; border-left: 1px solid {C.BORDER};")
+        w.setStyleSheet("background: transparent; border: none;")
         lay = QVBoxLayout(w)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(6)
@@ -4177,7 +4177,7 @@ class MainWindow(QMainWindow):
 
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
-        lay.addWidget(sep)
+        sep.hide()
 
         lay.addWidget(_sec("FILE UPLOAD"))
         self._drop_zone = FileDropZone()
@@ -4192,7 +4192,7 @@ class MainWindow(QMainWindow):
 
         sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
-        lay.addWidget(sep2)
+        sep2.hide()
 
         lay.addWidget(_sec("COMMAND INPUT"))
         lay.addLayout(self._build_input_row())
@@ -4203,14 +4203,14 @@ class MainWindow(QMainWindow):
         self._interrupt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._interrupt_btn.setStyleSheet(f"""
             QPushButton {{
-                background: #140008; color: {C.MUTED_C};
-                border: 1px solid {C.MUTED_C}; border-radius: 3px;
+                background: transparent; color: {C.MUTED_C};
+                border: none;
             }}
             QPushButton:hover {{
-                background: #200010; border: 1px solid #ff6688;
+                background: transparent; color: #ff6688;
             }}
             QPushButton:pressed {{
-                background: #300018;
+                background: transparent;
             }}
         """)
         self._interrupt_btn.clicked.connect(self._do_interrupt)
@@ -4464,10 +4464,10 @@ class MainWindow(QMainWindow):
         self._input.setFixedHeight(48)
         self._input.setStyleSheet(f"""
             QLineEdit {{
-                background: #000d14; color: {C.WHITE};
-                border: 1px solid {C.BORDER}; border-radius: 3px; padding: 3px 7px;
+                background: transparent; color: {C.WHITE};
+                border: none; padding: 3px 7px;
             }}
-            QLineEdit:focus {{ border: 1px solid {C.PRI}; }}
+            QLineEdit:focus {{ color: {C.PRI}; }}
         """)
         self._input.returnPressed.connect(self._send)
         row.addWidget(self._input)
@@ -4478,10 +4478,10 @@ class MainWindow(QMainWindow):
         send.setCursor(Qt.CursorShape.PointingHandCursor)
         send.setStyleSheet(f"""
             QPushButton {{
-                background: {C.PANEL}; color: {C.PRI};
-                border: 1px solid {C.PRI_DIM}; border-radius: 3px;
+                background: transparent; color: {C.PRI};
+                border: none;
             }}
-            QPushButton:hover {{ background: {C.PRI_GHO}; border: 1px solid {C.PRI}; }}
+            QPushButton:hover {{ background: transparent; color: {C.WHITE}; }}
         """)
         send.clicked.connect(self._send)
         row.addWidget(send)
@@ -4496,8 +4496,8 @@ class MainWindow(QMainWindow):
         w.setObjectName("ContentPanel")
         w.setStyleSheet(f"""
             QWidget#ContentPanel {{
-                background: {C.PANEL};
-                border-top: 1px solid {C.BORDER_B};
+                background: transparent;
+                border: none;
             }}
         """)
         w.hide()
@@ -4711,8 +4711,8 @@ class MainWindow(QMainWindow):
         w.setObjectName("QuizPanel")
         w.setStyleSheet(f"""
             QWidget#QuizPanel {{
-                background: {C.PANEL};
-                border-top: 1px solid {C.BORDER_B};
+                background: transparent;
+                border: none;
             }}
         """)
         w.hide()
@@ -4953,7 +4953,7 @@ class MainWindow(QMainWindow):
     def _build_footer(self) -> QWidget:
         w = QWidget()
         w.setFixedHeight(30)
-        w.setStyleSheet(f"background: {C.DARK}; border-top: 1px solid {C.BORDER};")
+        w.setStyleSheet("background: transparent; border: none;")
         lay = QHBoxLayout(w); lay.setContentsMargins(14, 0, 14, 0)
 
         def _fl(txt, color=C.TEXT_MED):
@@ -5595,18 +5595,18 @@ class MainWindow(QMainWindow):
             self._mute_btn.setText("🔇  MICROPHONE MUTED")
             self._mute_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: #140006; color: {C.MUTED_C};
-                    border: 1px solid {C.MUTED_C}; border-radius: 3px;
+                    background: transparent; color: {C.MUTED_C};
+                    border: none;
                 }}
             """)
         else:
             self._mute_btn.setText("🎙  MICROPHONE ACTIVE")
             self._mute_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: #00140a; color: {C.GREEN};
-                    border: 1px solid {C.GREEN}; border-radius: 3px;
+                    background: transparent; color: {C.GREEN};
+                    border: none;
                 }}
-                QPushButton:hover {{ background: #001f10; }}
+                QPushButton:hover {{ background: transparent; }}
             """)
 
     def _send(self):
