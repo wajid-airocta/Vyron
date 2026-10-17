@@ -3,9 +3,11 @@ package com.airocta.vyron;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.ActivityManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.os.BatteryManager;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.net.http.SslCertificate;
@@ -43,6 +45,12 @@ public final class MainActivity extends Activity {
     private ScrollView chatScroll;
     private EditText promptInput;
     private Button sendButton;
+    private Button voiceButton;
+    private ReactorView reactor;
+    private TextView voiceStatus;
+    private TextView userTranscript;
+    private TextView assistantTranscript;
+    private LiveVoiceSession liveSession;
     private TextView keyStatus;
     private final JSONArray conversation = new JSONArray();
     private EditText urlInput;
@@ -66,52 +74,75 @@ public final class MainActivity extends Activity {
         }
         LinearLayout root=new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(2,7,10));
+        root.setBackgroundColor(Color.BLACK);
         LinearLayout top=new LinearLayout(this);
-        top.setPadding(10,6,10,6);
-        top.setBackgroundColor(Color.rgb(21,36,44));
+        top.setPadding(16,8,12,2);
+        top.setGravity(android.view.Gravity.CENTER_VERTICAL);
         TextView title=new TextView(this);
         title.setText("◈  VYRON");
-        title.setTextColor(Color.rgb(202,241,245));
-        title.setTextSize(18);
+        title.setTextColor(Color.rgb(0,220,244));
+        title.setTextSize(20);
+        title.setTypeface(android.graphics.Typeface.MONOSPACE,android.graphics.Typeface.BOLD);
         top.addView(title,new LinearLayout.LayoutParams(0,-2,1));
-        Button api=button("API");
-        api.setOnClickListener(v->showApiSettings());
-        Button chat=button("CHAT");
-        chat.setOnClickListener(v->showMode(false));
-        top.addView(chat);
-        Button remote=button("MAC");
-        remote.setOnClickListener(v->showMode(true));
-        top.addView(remote);
-        top.addView(api);
+        TextView subtitle=new TextView(this);
+        subtitle.setText("PERSONAL AUTONOMOUS INTELLIGENCE");
+        subtitle.setTextColor(Color.rgb(80,154,171));
+        subtitle.setTextSize(9);
+        subtitle.setTypeface(android.graphics.Typeface.MONOSPACE);
+        top.addView(subtitle);
         root.addView(top);
         chatPanel=new LinearLayout(this);
         chatPanel.setOrientation(LinearLayout.VERTICAL);
-        TextView introduction=new TextView(this);
-        introduction.setText("VYRON  •  Phone assistant\nAsk a question below. Mac control is available in the MAC tab.");
-        introduction.setTextColor(Color.rgb(126,225,226));
-        introduction.setTextSize(16);
-        introduction.setPadding(20,24,20,18);
-        chatPanel.addView(introduction);
         keyStatus=new TextView(this);
-        keyStatus.setTextColor(Color.rgb(91,200,143));
-        keyStatus.setTextSize(13);
-        keyStatus.setPadding(20,0,20,12);
+        keyStatus.setTextColor(Color.rgb(77,170,182));
+        keyStatus.setTextSize(10);
+        keyStatus.setTypeface(android.graphics.Typeface.MONOSPACE);
+        keyStatus.setGravity(android.view.Gravity.CENTER);
+        keyStatus.setPadding(10,0,10,0);
         chatPanel.addView(keyStatus);
         updateKeyStatus();
+        reactor=new ReactorView(this);
+        chatPanel.addView(reactor,new LinearLayout.LayoutParams(-1,0,1));
+        voiceStatus=new TextView(this);
+        voiceStatus.setText("READY  ·  TAP TO SPEAK");
+        voiceStatus.setTextColor(Color.rgb(0,220,244));
+        voiceStatus.setTextSize(13);
+        voiceStatus.setTypeface(android.graphics.Typeface.MONOSPACE,android.graphics.Typeface.BOLD);
+        voiceStatus.setGravity(android.view.Gravity.CENTER);
+        chatPanel.addView(voiceStatus);
+        userTranscript=new TextView(this);
+        userTranscript.setTextColor(Color.rgb(126,198,211));
+        userTranscript.setTextSize(14);
+        userTranscript.setGravity(android.view.Gravity.CENTER);
+        userTranscript.setPadding(18,6,18,2);
+        userTranscript.setMaxLines(2);
+        chatPanel.addView(userTranscript);
+        assistantTranscript=new TextView(this);
+        assistantTranscript.setTextColor(Color.rgb(218,247,248));
+        assistantTranscript.setTextSize(16);
+        assistantTranscript.setGravity(android.view.Gravity.CENTER);
+        assistantTranscript.setPadding(18,4,18,8);
+        assistantTranscript.setMaxLines(3);
+        chatPanel.addView(assistantTranscript);
+        voiceButton=button("●  START VOICE");
+        voiceButton.setTextSize(16);
+        voiceButton.setTextColor(Color.rgb(0,229,201));
+        voiceButton.setOnClickListener(v->toggleVoice());
+        chatPanel.addView(voiceButton,new LinearLayout.LayoutParams(-1,-2));
         chatScroll=new ScrollView(this);
         messages=new LinearLayout(this);
         messages.setOrientation(LinearLayout.VERTICAL);
         messages.setPadding(16,8,16,8);
         chatScroll.addView(messages);
-        chatPanel.addView(chatScroll,new LinearLayout.LayoutParams(-1,0,1));
+        chatPanel.addView(chatScroll,new LinearLayout.LayoutParams(-1,dp(78)));
+        chatScroll.setVisibility(View.GONE);
         LinearLayout composer=new LinearLayout(this);
-        composer.setPadding(8,8,8,12);
+        composer.setPadding(8,2,8,8);
         promptInput=new EditText(this);
-        promptInput.setHint("Ask VYRON…");
+        promptInput.setHint("Or type to VYRON…");
         promptInput.setTextColor(Color.WHITE);
         promptInput.setHintTextColor(Color.rgb(143,179,185));
-        promptInput.setMaxLines(4);
+        promptInput.setSingleLine(true);
         composer.addView(promptInput,new LinearLayout.LayoutParams(0,-2,1));
         sendButton=button("SEND");
         sendButton.setOnClickListener(v->sendChat());
@@ -141,7 +172,7 @@ public final class MainActivity extends Activity {
         status.setText("Connect to the HTTPS address shown by VYRON on your Mac.");
         remotePanel.addView(status);
         web=new WebView(this);
-        web.setBackgroundColor(Color.rgb(2,7,10));
+        web.setBackgroundColor(Color.BLACK);
         web.getSettings().setJavaScriptEnabled(true);
         web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setMediaPlaybackRequiresUserGesture(false);
@@ -200,6 +231,22 @@ public final class MainActivity extends Activity {
         });
         remotePanel.addView(web,new LinearLayout.LayoutParams(-1,0,1));
         root.addView(remotePanel,new LinearLayout.LayoutParams(-1,0,1));
+        LinearLayout navigation=new LinearLayout(this);
+        navigation.setGravity(android.view.Gravity.CENTER);
+        String[] sections={"VOICE","SYSTEM","WEATHER","MAC","SETTINGS"};
+        for(int i=0;i<sections.length;i++){
+            final int section=i;
+            TextView entry=new TextView(this);
+            entry.setText(sections[i]);
+            entry.setTextColor(i==0?Color.rgb(0,220,244):Color.rgb(99,161,176));
+            entry.setTextSize(10);
+            entry.setTypeface(android.graphics.Typeface.MONOSPACE,android.graphics.Typeface.BOLD);
+            entry.setGravity(android.view.Gravity.CENTER);
+            entry.setMinHeight(dp(44));
+            entry.setOnClickListener(v->openSection(section));
+            navigation.addView(entry,new LinearLayout.LayoutParams(0,-2,1));
+        }
+        root.addView(navigation);
         setContentView(root);
         showMode(false);
         if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)!=PackageManager.PERMISSION_GRANTED)
@@ -209,11 +256,45 @@ public final class MainActivity extends Activity {
     private Button button(String label) {
         Button b=new Button(this);
         b.setText(label);
-        b.setTextColor(Color.rgb(218,247,248));
-        b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(30,70,81)));
+        b.setTextColor(Color.rgb(145,225,234));
+        b.setTextSize(11);
+        b.setTypeface(android.graphics.Typeface.MONOSPACE,android.graphics.Typeface.BOLD);
+        b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.BLACK));
         return b;
     }
+    private int dp(int value) { return (int)(value*getResources().getDisplayMetrics().density+.5f); }
+    private void openSection(int section){
+        if(section==4){showApiSettings();return;}
+        showMode(section==3);
+        if(section==3)return;
+        if(section==0){
+            voiceStatus.setText(liveSession==null?"READY  ·  TAP TO SPEAK":"LIVE  ·  TAP TO END");
+            return;
+        }
+        if(section==1){
+            ActivityManager manager=(ActivityManager)getSystemService(ACTIVITY_SERVICE);
+            ActivityManager.MemoryInfo info=new ActivityManager.MemoryInfo();
+            manager.getMemoryInfo(info);
+            BatteryManager power=(BatteryManager)getSystemService(BATTERY_SERVICE);
+            int charge=power==null?-1:power.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+            voiceStatus.setText("SYSTEM  ·  LIVE DEVICE DATA");
+            userTranscript.setText("BATTERY  "+(charge<0?"N/A":charge+"%")+"  •  MEMORY  "+
+                    Math.round((info.totalMem-info.availMem)*100.0/info.totalMem)+"%");
+            assistantTranscript.setText("AVAILABLE MEMORY  "+
+                    String.format(java.util.Locale.US,"%.1f",info.availMem/1073741824.0)+" GB");
+        } else {
+            voiceStatus.setText("WEATHER  ·  CURRENT LOCATION");
+            assistantTranscript.setText("Loading current conditions…");
+            WeatherRepository.refresh(this,()->{
+                WeatherRepository.Snapshot value=WeatherRepository.current();
+                assistantTranscript.setText(value==null?WeatherRepository.status():
+                        value.temperature+"°C  ·  "+value.condition+"  ·  wind "+value.wind+
+                                " km/h  ·  humidity "+value.humidity+"%");
+            });
+        }
+    }
     private void showMode(boolean remote) {
+        if(remote) stopVoice();
         chatPanel.setVisibility(remote ? View.GONE : View.VISIBLE);
         remotePanel.setVisibility(remote ? View.VISIBLE : View.GONE);
         if (remote && web.getUrl() == null && !urlInput.getText().toString().trim().isEmpty()) connect();
@@ -229,12 +310,56 @@ public final class MainActivity extends Activity {
     }
     private void addMessage(String speaker,String value) {
         TextView item=new TextView(this);
-        item.setText(speaker+"\n"+value);
-        item.setTextColor(Color.rgb(218,247,248));
-        item.setTextSize(17);
-        item.setPadding(14,12,14,16);
+        item.setText(speaker+"  ·  "+value);
+        item.setTextColor(Color.rgb(138,204,214));
+        item.setTextSize(12);
+        item.setPadding(14,2,14,3);
         messages.addView(item,new LinearLayout.LayoutParams(-1,-2));
+        chatScroll.setVisibility(View.VISIBLE);
         chatScroll.post(()->chatScroll.fullScroll(View.FOCUS_DOWN));
+    }
+    private void toggleVoice() {
+        if(liveSession!=null){stopVoice();return;}
+        if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},13);
+            return;
+        }
+        String key=activeKey();
+        if(key==null || key.trim().isEmpty()){showApiSettings();return;}
+        userTranscript.setText("");
+        assistantTranscript.setText("");
+        final LiveVoiceSession[] current=new LiveVoiceSession[1];
+        current[0]=new LiveVoiceSession(this,getPreferences(0).getString("user_name",""),
+                new LiveVoiceSession.Listener(){
+                    @Override public void onState(String value){runOnUiThread(()->{
+                        if(liveSession!=current[0])return;
+                        reactor.setState(value);
+                        voiceStatus.setText(value+"  ·  TAP TO END");
+                    });}
+                    @Override public void onTranscript(boolean user,String text){runOnUiThread(()->{
+                        if(liveSession!=current[0])return;
+                        (user?userTranscript:assistantTranscript).setText((user?"YOU  ·  ":"VYRON  ·  ")+text);
+                    });}
+                    @Override public void onLevel(float level){runOnUiThread(()->{
+                        if(liveSession==current[0])reactor.setMicLevel(level);
+                    });}
+                    @Override public void onStopped(String message){runOnUiThread(()->{
+                        if(liveSession!=current[0])return;
+                        stopVoice();
+                        assistantTranscript.setText(message);
+                    });}
+                });
+        liveSession=current[0];
+        voiceButton.setText("■  END VOICE");
+        liveSession.start(key);
+    }
+    private void stopVoice(){
+        LiveVoiceSession old=liveSession;
+        liveSession=null;
+        if(old!=null)old.stop();
+        if(reactor!=null)reactor.setState("READY");
+        if(voiceStatus!=null)voiceStatus.setText("READY  ·  TAP TO SPEAK");
+        if(voiceButton!=null)voiceButton.setText("●  START VOICE");
     }
     private void sendChat() {
         String prompt=promptInput.getText().toString().trim();
@@ -246,6 +371,10 @@ public final class MainActivity extends Activity {
         }
         promptInput.setText("");
         addMessage("YOU",prompt);
+        if(liveSession!=null && liveSession.isReady()){
+            liveSession.sendText(prompt);
+            return;
+        }
         sendButton.setEnabled(false);
         try {
             conversation.put(GeminiClient.turn("user",prompt));
@@ -279,28 +408,39 @@ public final class MainActivity extends Activity {
         web.loadUrl(value);
     }
     private void showApiSettings() {
+        LinearLayout form=new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(20),0,dp(20),0);
+        EditText nameField=new EditText(this);
+        nameField.setSingleLine(true);
+        nameField.setHint("Your name (optional)");
+        nameField.setText(getPreferences(0).getString("user_name",""));
+        form.addView(nameField);
         EditText field=new EditText(this);
         field.setSingleLine(true);
         field.setHint("Paste your Gemini API key");
         field.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        field.setPadding(24,16,24,16);
+        field.setPadding(0,dp(12),0,dp(12));
+        form.addView(field);
         String source=SecretStore.load(this)!=null ? "Your encrypted phone override is active."
                 : BuildConfig.STARTER_GEMINI_API_KEY.trim().isEmpty() ? "No starter key is included in this build."
                 : "The local test starter key is active.";
-        new AlertDialog.Builder(this).setTitle("Gemini API key")
-                .setMessage(source+" Enter a key to override it on this phone. MAC mode uses the paired Mac unless an override is saved.")
-                .setView(field)
-                .setPositiveButton("SAVE OVERRIDE",(d,w)->{
+        new AlertDialog.Builder(this).setTitle("VYRON settings")
+                .setMessage(source+" Set your name and optionally override the Gemini key on this phone.")
+                .setView(form)
+                .setPositiveButton("SAVE",(d,w)->{
+                    getPreferences(0).edit().putString("user_name",nameField.getText().toString().trim()).apply();
                     String value=field.getText().toString().trim();
                     if(value.isEmpty()){
-                        Toast.makeText(this,"Enter a key or choose USE STARTER.",Toast.LENGTH_LONG).show();
+                        Toast.makeText(this,"Settings saved. Current API key is unchanged.",Toast.LENGTH_SHORT).show();
                         return;
                     }
                     try { SecretStore.save(this,value); updateKeyStatus(); Toast.makeText(this,"Phone API override saved.",Toast.LENGTH_SHORT).show(); }
                     catch(Exception e){Toast.makeText(this,"Could not save the key securely.",Toast.LENGTH_LONG).show();}
                 })
                 .setNeutralButton("USE STARTER",(d,w)->{
-                    try { SecretStore.save(this,null); updateKeyStatus(); Toast.makeText(this,"Using the starter key in CHAT mode.",Toast.LENGTH_SHORT).show(); }
+                    getPreferences(0).edit().putString("user_name",nameField.getText().toString().trim()).apply();
+                    try { SecretStore.save(this,null); updateKeyStatus(); Toast.makeText(this,"Using the starter key for Gemini Live.",Toast.LENGTH_SHORT).show(); }
                     catch(Exception e){Toast.makeText(this,"Could not clear the override.",Toast.LENGTH_LONG).show();}
                 })
                 .setNegativeButton("CANCEL",null).show();
@@ -313,6 +453,10 @@ public final class MainActivity extends Activity {
             if(granted) primeLocation();
         }
         if(requestCode==11 && webPermission!=null){if(granted)webPermission.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});else webPermission.deny();webPermission=null;}
+        if(requestCode==13){
+            if(granted)toggleVoice();
+            else Toast.makeText(this,"Microphone permission is required for voice.",Toast.LENGTH_LONG).show();
+        }
     }
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data) {
         super.onActivityResult(requestCode,resultCode,data);
@@ -336,7 +480,8 @@ public final class MainActivity extends Activity {
         }catch(Exception ignored){}
     }
     @Override public void onBackPressed() { if(remotePanel.getVisibility()==View.VISIBLE && web.canGoBack())web.goBack();else super.onBackPressed(); }
-    @Override protected void onDestroy(){web.destroy();super.onDestroy();}
+    @Override protected void onPause(){stopVoice();super.onPause();}
+    @Override protected void onDestroy(){stopVoice();web.destroy();super.onDestroy();}
 
     private final class Bridge {
         @JavascriptInterface public boolean hasOverride(){return SecretStore.load(MainActivity.this)!=null;}
