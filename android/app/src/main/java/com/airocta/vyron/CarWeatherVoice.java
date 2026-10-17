@@ -18,6 +18,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
+import okio.ByteString;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -29,10 +30,12 @@ final class CarWeatherVoice {
     private final Listener listener;
     private final AtomicBoolean active = new AtomicBoolean(true);
     private final OkHttpClient client = new OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.MILLISECONDS).build();
     private volatile WebSocket socket;
     private volatile CarAudioRecord recorder;
     private AudioFocusRequest focus;
+    private volatile boolean setupReady;
     private String question = "";
     private String answer = "";
 
@@ -55,6 +58,9 @@ final class CarWeatherVoice {
             stop(); return;
         }
         listener.onUpdate("Connecting to Gemini Live", "", "");
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (active.get() && !setupReady) finish("Weather voice connection timed out");
+        }, 15000);
         String endpoint = "wss://generativelanguage.googleapis.com/ws/"
                 + "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key="
                 + android.net.Uri.encode(key);
@@ -88,6 +94,7 @@ final class CarWeatherVoice {
                         try {
                             JSONObject message = new JSONObject(text);
                             if (message.has("setupComplete")) {
+                                setupReady = true;
                                 new Thread(CarWeatherVoice.this::record, "vyron-car-weather-mic").start();
                             }
                             JSONObject content = message.optJSONObject("serverContent");
@@ -106,6 +113,10 @@ final class CarWeatherVoice {
                             }
                             if (content.optBoolean("turnComplete")) finish("Weather ready");
                         } catch (Exception ignored) { /* Ignore non-content event. */ }
+                    }
+
+                    @Override public void onMessage(WebSocket ws, ByteString bytes) {
+                        onMessage(ws, bytes.utf8());
                     }
 
                     @Override public void onFailure(WebSocket ws, Throwable error, Response response) {

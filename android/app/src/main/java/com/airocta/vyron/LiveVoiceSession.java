@@ -9,6 +9,8 @@ import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaRecorder;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Base64;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -18,6 +20,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
+import okio.ByteString;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -42,6 +45,7 @@ final class LiveVoiceSession {
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final LinkedBlockingQueue<byte[]> audioQueue = new LinkedBlockingQueue<>(80);
     private final OkHttpClient client = new OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.MILLISECONDS).pingInterval(20, TimeUnit.SECONDS).build();
     private volatile WebSocket socket;
     private volatile AudioRecord recorder;
@@ -61,11 +65,16 @@ final class LiveVoiceSession {
 
     void start(String key) {
         listener.onState("CONNECTING");
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (running.get() && !ready)
+                fail("Gemini Live did not respond within 15 seconds. Check this phone's connection.");
+        }, 15000);
         Request request = new Request.Builder().url(ENDPOINT + "?key=" +
                 android.net.Uri.encode(key)).build();
         socket = client.newWebSocket(request, new WebSocketListener() {
             @Override public void onOpen(WebSocket ws, Response response) {
                 if (!running.get()) { ws.close(1000, "Stopped"); return; }
+                listener.onState("AUTHENTICATING");
                 try {
                     String identity = name.isEmpty() ? "" : "The user's name is " + name
                             + ". Use it naturally at the start of a conversation or a new topic, not every reply. ";
@@ -137,6 +146,11 @@ final class LiveVoiceSession {
                         listener.onState("LISTENING");
                     }
                 } catch (Exception ignored) { /* Ignore malformed non-audio event. */ }
+            }
+
+            // Gemini Live sends JSON in binary frames; handling text alone leaves setup stuck.
+            @Override public void onMessage(WebSocket ws, ByteString bytes) {
+                onMessage(ws, bytes.utf8());
             }
 
             @Override public void onFailure(WebSocket ws, Throwable error, Response response) {
