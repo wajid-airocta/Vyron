@@ -1,5 +1,7 @@
 plugins { id 'com.android.application' }
 
+def localReleaseStore = System.getenv('VYRON_RELEASE_STORE_FILE')
+
 android {
     namespace 'com.airocta.vyron'
     compileSdk 35
@@ -12,13 +14,25 @@ android {
         versionName '1.0.0'
     }
     buildFeatures { buildConfig true }
+    signingConfigs {
+        localRelease {
+            if (localReleaseStore) {
+                storeFile file(localReleaseStore)
+                storePassword System.getenv('VYRON_RELEASE_STORE_PASSWORD')
+                keyAlias System.getenv('VYRON_RELEASE_KEY_ALIAS')
+                keyPassword System.getenv('VYRON_RELEASE_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         debug {
             buildConfigField 'String', 'STARTER_GEMINI_API_KEY',
                     groovy.json.JsonOutput.toJson(System.getenv('VYRON_STARTER_KEY') ?: '')
         }
         release {
-            buildConfigField 'String', 'STARTER_GEMINI_API_KEY', '""'
+            buildConfigField 'String', 'STARTER_GEMINI_API_KEY',
+                    groovy.json.JsonOutput.toJson(System.getenv('VYRON_STARTER_KEY') ?: '')
+            if (localReleaseStore) signingConfig signingConfigs.localRelease
         }
     }
     compileOptions {
