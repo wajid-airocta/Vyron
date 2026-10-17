@@ -841,42 +841,52 @@ class HudCanvas(QWidget):
             (190, "PROC", values.get("proc", "N/A"), C.TEXT_MED, None),
             (230, "OS", values.get("os", "N/A"), C.ACC2, None),
         )
-        orbit = radius * 1.16
+        # Each percentage uses a short arc on the reactor's outer orbit.
+        # The arc is fixed in place and its bright sweep grows with live data.
+        orbit = radius * 1.30
+        arc_radius = radius * 1.09
+        arc_rect = QRectF(cx - arc_radius, cy - arc_radius,
+                          arc_radius * 2, arc_radius * 2)
+        arc_span = 28 * 16  # Qt stores angles in sixteenths of a degree.
         for degrees, label, value, colour, progress in nodes:
             a = math.radians(degrees)
             ca, sa = math.cos(a), math.sin(a)
-            dot_x, dot_y = cx + ca * radius * 1.04, cy + sa * radius * 1.04
             text_x, text_y = cx + ca * orbit, cy + sa * orbit
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QBrush(qcol(colour)))
-            p.drawEllipse(QRectF(dot_x - 2, dot_y - 2, 4, 4))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setPen(QPen(qcol(C.TEXT_DIM), 1))
-            p.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
-            p.drawText(QRectF(text_x - 48, text_y - 15, 96, 12),
-                       Qt.AlignmentFlag.AlignCenter, label)
-            p.setPen(QPen(qcol(colour if value != "N/A" else C.TEXT_DIM), 1))
-            p.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
-            p.drawText(QRectF(text_x - 56, text_y - 1, 112, 17),
-                       Qt.AlignmentFlag.AlignCenter, value)
             if progress is not None:
                 try:
                     fraction = max(0.0, min(1.0, float(progress) / 100.0))
                 except (TypeError, ValueError):
                     fraction = 0.0
-                track = QRectF(text_x - 28, text_y + 18, 56, 3)
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QBrush(qcol(C.BORDER_A)))
-                p.drawRoundedRect(track, 1.5, 1.5)
+                start_angle = int((-degrees - 14) * 16)
+                track_pen = QPen(qcol(C.BORDER_A), 4)
+                track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                p.setPen(track_pen)
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawArc(arc_rect, start_angle, arc_span)
                 if fraction > 0:
                     fill_colour = C.RED if fraction > 0.85 else (
                         C.ACC if fraction > 0.65 else colour)
-                    p.setBrush(QBrush(qcol(fill_colour)))
-                    p.drawRoundedRect(
-                        QRectF(track.x(), track.y(), max(2.0, track.width() * fraction), 3),
-                        1.5, 1.5,
-                    )
+                    fill_pen = QPen(qcol(fill_colour), 5)
+                    fill_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                    p.setPen(fill_pen)
+                    p.drawArc(arc_rect, start_angle, max(1, int(arc_span * fraction)))
+            else:
+                # Non-percentage facts keep a small point on the same orbit.
+                dot_x = cx + ca * arc_radius
+                dot_y = cy + sa * arc_radius
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(qcol(colour)))
+                p.drawEllipse(QRectF(dot_x - 2, dot_y - 2, 4, 4))
                 p.setBrush(Qt.BrushStyle.NoBrush)
+
+            p.setPen(QPen(qcol(C.TEXT_DIM), 1))
+            p.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+            p.drawText(QRectF(text_x - 60, text_y - 21, 120, 16),
+                       Qt.AlignmentFlag.AlignCenter, label)
+            p.setPen(QPen(qcol(colour if value != "N/A" else C.TEXT_DIM), 1))
+            p.setFont(QFont("Courier New", 13, QFont.Weight.Bold))
+            p.drawText(QRectF(text_x - 68, text_y - 2, 136, 22),
+                       Qt.AlignmentFlag.AlignCenter, value)
 
     def paintEvent(self, _):
         p = QPainter(self)
