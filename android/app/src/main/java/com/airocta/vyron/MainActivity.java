@@ -41,6 +41,16 @@ public final class MainActivity extends Activity {
     private WebView web;
     private LinearLayout remotePanel;
     private LinearLayout chatPanel;
+    private LinearLayout systemPanel;
+    private TextView systemReadout;
+    private final android.os.Handler systemHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable refreshSystem=new Runnable(){@Override public void run(){
+        if(systemReadout!=null && systemPanel!=null && systemPanel.getVisibility()==View.VISIBLE)
+            new Thread(()->{String value=PhoneSystemRepository.display(MainActivity.this);
+                runOnUiThread(()->{if(systemPanel.getVisibility()==View.VISIBLE)systemReadout.setText(value);});
+            },"vyron-system-sample").start();
+        systemHandler.postDelayed(this,3000);
+    }};
     private LinearLayout messages;
     private ScrollView chatScroll;
     private EditText promptInput;
@@ -149,6 +159,34 @@ public final class MainActivity extends Activity {
         composer.addView(sendButton);
         chatPanel.addView(composer);
         root.addView(chatPanel,new LinearLayout.LayoutParams(-1,0,1));
+        systemPanel=new LinearLayout(this);
+        systemPanel.setOrientation(LinearLayout.VERTICAL);
+        systemPanel.setPadding(dp(18),dp(10),dp(18),dp(6));
+        TextView systemTitle=new TextView(this);
+        systemTitle.setText("◈  PHONE SYSTEM  ·  LIVE");
+        systemTitle.setTextColor(Color.rgb(0,220,244));
+        systemTitle.setTextSize(16);
+        systemTitle.setTypeface(android.graphics.Typeface.MONOSPACE,android.graphics.Typeface.BOLD);
+        systemPanel.addView(systemTitle);
+        ScrollView systemScroll=new ScrollView(this);
+        systemReadout=new TextView(this);
+        systemReadout.setTextColor(Color.rgb(164,227,232));
+        systemReadout.setTextSize(14);
+        systemReadout.setTypeface(android.graphics.Typeface.MONOSPACE);
+        systemReadout.setLineSpacing(dp(3),1.05f);
+        systemReadout.setText("Reading phone status…");
+        systemScroll.addView(systemReadout);
+        systemPanel.addView(systemScroll,new LinearLayout.LayoutParams(-1,0,1));
+        Button apps=button("OPEN APP");
+        apps.setOnClickListener(v->showAppLauncher());
+        systemPanel.addView(apps);
+        Button controls=button("PHONE ACTIONS");
+        controls.setOnClickListener(v->showPhoneActions());
+        systemPanel.addView(controls);
+        Button permissions=button("PERMISSIONS & PHONE CONTROL");
+        permissions.setOnClickListener(v->showPermissionSetup());
+        systemPanel.addView(permissions);
+        root.addView(systemPanel,new LinearLayout.LayoutParams(-1,0,1));
         remotePanel=new LinearLayout(this);
         remotePanel.setOrientation(LinearLayout.VERTICAL);
         LinearLayout connect=new LinearLayout(this);
@@ -248,7 +286,8 @@ public final class MainActivity extends Activity {
         }
         root.addView(navigation);
         setContentView(root);
-        showMode(false);
+        showMode(0);
+        systemHandler.post(refreshSystem);
         if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)!=PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION},10);
     }
@@ -265,23 +304,14 @@ public final class MainActivity extends Activity {
     private int dp(int value) { return (int)(value*getResources().getDisplayMetrics().density+.5f); }
     private void openSection(int section){
         if(section==4){showApiSettings();return;}
-        showMode(section==3);
+        showMode(section==3?2:section==1?1:0);
         if(section==3)return;
         if(section==0){
             voiceStatus.setText(liveSession==null?"READY  ·  TAP TO SPEAK":"LIVE  ·  TAP TO END");
             return;
         }
         if(section==1){
-            ActivityManager manager=(ActivityManager)getSystemService(ACTIVITY_SERVICE);
-            ActivityManager.MemoryInfo info=new ActivityManager.MemoryInfo();
-            manager.getMemoryInfo(info);
-            BatteryManager power=(BatteryManager)getSystemService(BATTERY_SERVICE);
-            int charge=power==null?-1:power.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
-            voiceStatus.setText("SYSTEM  ·  LIVE DEVICE DATA");
-            userTranscript.setText("BATTERY  "+(charge<0?"N/A":charge+"%")+"  •  MEMORY  "+
-                    Math.round((info.totalMem-info.availMem)*100.0/info.totalMem)+"%");
-            assistantTranscript.setText("AVAILABLE MEMORY  "+
-                    String.format(java.util.Locale.US,"%.1f",info.availMem/1073741824.0)+" GB");
+            systemReadout.setText("Reading phone status…");
         } else {
             voiceStatus.setText("WEATHER  ·  CURRENT LOCATION");
             assistantTranscript.setText("Loading current conditions…");
@@ -293,11 +323,79 @@ public final class MainActivity extends Activity {
             });
         }
     }
-    private void showMode(boolean remote) {
-        if(remote) stopVoice();
-        chatPanel.setVisibility(remote ? View.GONE : View.VISIBLE);
-        remotePanel.setVisibility(remote ? View.VISIBLE : View.GONE);
-        if (remote && web.getUrl() == null && !urlInput.getText().toString().trim().isEmpty()) connect();
+    private void showMode(int mode) {
+        if(mode==2) stopVoice();
+        chatPanel.setVisibility(mode==0 ? View.VISIBLE : View.GONE);
+        systemPanel.setVisibility(mode==1 ? View.VISIBLE : View.GONE);
+        remotePanel.setVisibility(mode==2 ? View.VISIBLE : View.GONE);
+        if (mode==2 && web.getUrl() == null && !urlInput.getText().toString().trim().isEmpty()) connect();
+    }
+
+    private void showAppLauncher(){
+        EditText name=new EditText(this);
+        name.setSingleLine(true);
+        name.setHint("App name, e.g. Maps");
+        name.setTextColor(Color.WHITE);
+        LinearLayout holder=new LinearLayout(this);
+        holder.setPadding(dp(20),0,dp(20),0);
+        holder.addView(name,new LinearLayout.LayoutParams(-1,-2));
+        new AlertDialog.Builder(this).setTitle("Open an installed app").setView(holder)
+                .setPositiveButton("OPEN",(dialog,which)->{
+                    JSONObject args=new JSONObject();
+                    try{args.put("name",name.getText().toString());}catch(Exception ignored){}
+                    JSONObject result=new PhoneTools(this).execute("open_app",args);
+                    if(!"ok".equals(result.optString("status")))
+                        Toast.makeText(this,result.optString("detail",result.optJSONArray("matches")==null
+                                ?"No matching app.":"Several apps match. Enter a more exact name."),Toast.LENGTH_LONG).show();
+                }).setNegativeButton("CANCEL",null).show();
+    }
+
+    private void showPermissionSetup(){
+        JSONObject grants=PhoneSystemRepository.permissions(this);
+        String state="MICROPHONE  "+(grants.optBoolean("microphone")?"ON":"OFF")
+                +"\nLOCATION  "+(grants.optBoolean("location")?"ON":"OFF")
+                +"\nUSAGE ACCESS  "+(grants.optBoolean("usage_access")?"ON":"OFF")
+                +"\nACCESSIBILITY  "+(grants.optBoolean("accessibility_control")?"ON":"OFF")
+                +"\n\nAndroid requires you to grant Usage Access and Accessibility in Settings. "
+                +"Accessibility can read and act on the visible screen; use it only if you want phone control.";
+        new AlertDialog.Builder(this).setTitle("VYRON phone permissions").setMessage(state)
+                .setPositiveButton("USAGE ACCESS",(d,w)->startActivity(new Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)))
+                .setNeutralButton("ACCESSIBILITY",(d,w)->startActivity(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)))
+                .setNegativeButton("APP PERMISSIONS",(d,w)->startActivity(new Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:"+getPackageName())))).show();
+    }
+
+    private void showPhoneActions(){
+        String[] labels={"Home","Back","Recent apps","Notifications","Quick settings",
+                "Read visible screen","Tap visible text","Scroll down","Scroll up","Type into focused field"};
+        String[] actions={"home","back","recents","notifications","quick_settings",
+                "read_screen","tap_text","scroll_forward","scroll_backward","type_text"};
+        new AlertDialog.Builder(this).setTitle("Phone actions")
+                .setItems(labels,(dialog,which)->{
+                    String action=actions[which];
+                    if("tap_text".equals(action)||"type_text".equals(action)){
+                        EditText value=new EditText(this);
+                        value.setHint("tap_text".equals(action)?"Visible label":"Text to enter");
+                        new AlertDialog.Builder(this).setTitle(labels[which]).setView(value)
+                                .setPositiveButton("RUN",(d,w)->runPhoneAction(action,value.getText().toString()))
+                                .setNegativeButton("CANCEL",null).show();
+                    }else runPhoneAction(action,"");
+                }).setNegativeButton("CANCEL",null).show();
+    }
+    private void runPhoneAction(String action,String value){
+        new Thread(()->{
+            JSONObject args=new JSONObject();
+            try{args.put("action",action).put("value",value);}catch(Exception ignored){}
+            JSONObject result=new PhoneTools(this).execute("control_phone",args);
+            runOnUiThread(()->{
+                JSONArray screen=result.optJSONArray("visible_text");
+                String content=screen==null?result.optString("detail","Action unavailable"):
+                        result.optString("app","")+"\n\n"+screen.toString();
+                new AlertDialog.Builder(this).setTitle("Phone action")
+                        .setMessage(content).setPositiveButton("OK",null).show();
+            });
+        },"vyron-phone-action").start();
     }
     private String activeKey() {
         String override=SecretStore.load(this);
@@ -324,12 +422,20 @@ public final class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},13);
             return;
         }
+        if(android.os.Build.VERSION.SDK_INT>=33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED
+                && !getPreferences(0).getBoolean("notification_prompted",false)){
+            getPreferences(0).edit().putBoolean("notification_prompted",true).apply();
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},14);
+            return;
+        }
         String key=activeKey();
         if(key==null || key.trim().isEmpty()){showApiSettings();return;}
         userTranscript.setText("");
         assistantTranscript.setText("");
         final LiveVoiceSession[] current=new LiveVoiceSession[1];
         current[0]=new LiveVoiceSession(this,getPreferences(0).getString("user_name",""),
+                new PhoneTools(this),
                 new LiveVoiceSession.Listener(){
                     @Override public void onState(String value){runOnUiThread(()->{
                         if(liveSession!=current[0])return;
@@ -351,12 +457,15 @@ public final class MainActivity extends Activity {
                 });
         liveSession=current[0];
         voiceButton.setText("■  END VOICE");
+        try{startForegroundService(new Intent(this,VoiceKeeperService.class));}
+        catch(Exception ignored){Toast.makeText(this,"Background voice is unavailable on this phone.",Toast.LENGTH_LONG).show();}
         liveSession.start(key);
     }
     private void stopVoice(){
         LiveVoiceSession old=liveSession;
         liveSession=null;
         if(old!=null)old.stop();
+        stopService(new Intent(this,VoiceKeeperService.class));
         if(reactor!=null)reactor.setState("READY");
         if(voiceStatus!=null)voiceStatus.setText("READY  ·  TAP TO SPEAK");
         if(voiceButton!=null)voiceButton.setText("●  START VOICE");
@@ -457,6 +566,7 @@ public final class MainActivity extends Activity {
             if(granted)toggleVoice();
             else Toast.makeText(this,"Microphone permission is required for voice.",Toast.LENGTH_LONG).show();
         }
+        if(requestCode==14)toggleVoice();
     }
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data) {
         super.onActivityResult(requestCode,resultCode,data);
@@ -480,8 +590,8 @@ public final class MainActivity extends Activity {
         }catch(Exception ignored){}
     }
     @Override public void onBackPressed() { if(remotePanel.getVisibility()==View.VISIBLE && web.canGoBack())web.goBack();else super.onBackPressed(); }
-    @Override protected void onPause(){stopVoice();super.onPause();}
-    @Override protected void onDestroy(){stopVoice();web.destroy();super.onDestroy();}
+    @Override protected void onPause(){super.onPause();}
+    @Override protected void onDestroy(){systemHandler.removeCallbacks(refreshSystem);stopVoice();web.destroy();super.onDestroy();}
 
     private final class Bridge {
         @JavascriptInterface public boolean hasOverride(){return SecretStore.load(MainActivity.this)!=null;}

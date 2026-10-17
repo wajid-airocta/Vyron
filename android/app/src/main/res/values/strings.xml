@@ -1,4 +1,5 @@
 <resources>
+    <string name="accessibility_description">Allows VYRON to read and control the visible phone screen when you explicitly request it. Password fields are excluded.</string>
     <string name="app_name">VYRON</string>
     <string name="car_app_name">VYRON Weather</string>
 </resources>

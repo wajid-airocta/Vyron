@@ -4,13 +4,17 @@ import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
+import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaRecorder;
+import android.media.audiofx.AcousticEchoCanceler;
+import android.media.audiofx.NoiseSuppressor;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Base64;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -41,6 +45,7 @@ final class LiveVoiceSession {
     private static final int OUTPUT_RATE = 24000;
     private final Context context;
     private final Listener listener;
+    private final PhoneTools tools;
     private final String name;
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final LinkedBlockingQueue<byte[]> audioQueue = new LinkedBlockingQueue<>(80);
@@ -50,6 +55,11 @@ final class LiveVoiceSession {
     private volatile WebSocket socket;
     private volatile AudioRecord recorder;
     private volatile AudioTrack speaker;
+    private volatile AcousticEchoCanceler echoCanceler;
+    private volatile NoiseSuppressor noiseSuppressor;
+    private volatile boolean speakerWriting;
+    private volatile long microphoneMutedUntil;
+    private volatile long playbackExpectedEnd;
     private volatile boolean ready;
     private Thread captureThread;
     private Thread playbackThread;
@@ -57,10 +67,11 @@ final class LiveVoiceSession {
     private String assistantWords = "";
     private boolean completedTurn;
 
-    LiveVoiceSession(Context context, String name, Listener listener) {
+    LiveVoiceSession(Context context, String name, PhoneTools tools, Listener listener) {
         this.context = context.getApplicationContext();
         this.name = name == null ? "" : name.trim();
         this.listener = listener;
+        this.tools = tools;
     }
 
     void start(String key) {
@@ -80,11 +91,17 @@ final class LiveVoiceSession {
                             + ". Use it naturally at the start of a conversation or a new topic, not every reply. ";
                     String prompt = "You are VYRON, a concise, natural personal voice assistant on an Android phone. "
                             + identity + "Speak conversationally and answer in the user's language. "
-                            + "You can discuss information, but do not claim you executed device or Mac actions unless a tool actually did so.";
+                            + "Use phone tools for real device facts and requested actions. Report tool errors honestly. "
+                            + "Android restricts other apps' processes; usage history is not a live process list. "
+                            + "Only inspect or control another app when the user explicitly asks. "
+                            + "Never authorize payments, destructive actions, or permission grants. "
+                            + "Do not claim you executed device or Mac actions unless a tool actually did so.";
                     JSONObject setup = new JSONObject()
                             .put("model", MODEL)
                             .put("inputAudioTranscription", new JSONObject())
                             .put("outputAudioTranscription", new JSONObject())
+                            .put("tools",new JSONArray().put(new JSONObject()
+                                    .put("functionDeclarations",PhoneTools.declarations())))
                             .put("systemInstruction", new JSONObject().put("parts",
                                     new JSONArray().put(new JSONObject().put("text", prompt))))
                             .put("generationConfig", new JSONObject()
@@ -105,6 +122,24 @@ final class LiveVoiceSession {
                         startAudio();
                         listener.onState("LISTENING");
                     }
+                    JSONObject call=message.optJSONObject("toolCall");
+                    if(call!=null){
+                        JSONArray requests=call.optJSONArray("functionCalls");
+                        JSONArray replies=new JSONArray();
+                        if(requests!=null)for(int i=0;i<requests.length();i++){
+                            JSONObject request=requests.optJSONObject(i);
+                            if(request==null)continue;
+                            String name=request.optString("name","");
+                            JSONObject args=request.optJSONObject("args");
+                            JSONObject reply=new JSONObject().put("name",name)
+                                    .put("response",new JSONObject().put("result",
+                                            tools.execute(name,args==null?new JSONObject():args)));
+                            if(request.has("id"))reply.put("id",request.optString("id"));
+                            replies.put(reply);
+                        }
+                        if(replies.length()>0)ws.send(new JSONObject().put("toolResponse",
+                                new JSONObject().put("functionResponses",replies)).toString());
+                    }
                     JSONObject content = message.optJSONObject("serverContent");
                     if (content == null) return;
                     if (content.optBoolean("interrupted")) {
@@ -115,9 +150,11 @@ final class LiveVoiceSession {
                             track.flush();
                             track.play();
                         }
+                        playbackExpectedEnd=SystemClock.elapsedRealtime();
+                        microphoneMutedUntil=playbackExpectedEnd+700;
                     }
                     JSONObject input = content.optJSONObject("inputTranscription");
-                    if (input != null && !input.optString("text").isEmpty()) {
+                    if (input != null && !input.optString("text").isEmpty() && !shouldMuteMicrophone()) {
                         if (completedTurn) { userWords = ""; assistantWords = ""; completedTurn = false; }
                         userWords = mergeTranscription(userWords, input.optString("text"));
                         listener.onTranscript(true, userWords);
@@ -134,6 +171,7 @@ final class LiveVoiceSession {
                         JSONObject inline = part == null ? null : part.optJSONObject("inlineData");
                         if (inline != null && inline.optString("mimeType").startsWith("audio/pcm")) {
                             byte[] pcm = Base64.decode(inline.optString("data"), Base64.DEFAULT);
+                            microphoneMutedUntil=SystemClock.elapsedRealtime()+900;
                             if (pcm.length > 0 && !audioQueue.offer(pcm)) {
                                 audioQueue.poll();
                                 audioQueue.offer(pcm);
@@ -216,6 +254,16 @@ final class LiveVoiceSession {
             }
             recorder = input;
             speaker = output;
+            try{
+                if(AcousticEchoCanceler.isAvailable()){
+                    echoCanceler=AcousticEchoCanceler.create(input.getAudioSessionId());
+                    if(echoCanceler!=null)echoCanceler.setEnabled(true);
+                }
+                if(NoiseSuppressor.isAvailable()){
+                    noiseSuppressor=NoiseSuppressor.create(input.getAudioSessionId());
+                    if(noiseSuppressor!=null)noiseSuppressor.setEnabled(true);
+                }
+            }catch(Exception ignored){/* Some phones provide no usable audio effects. */}
             AudioManager manager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
             if (manager != null) manager.requestAudioFocus(null, AudioManager.STREAM_MUSIC,
                     AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
@@ -233,6 +281,7 @@ final class LiveVoiceSession {
         while (running.get()) {
             int count = input.read(buffer, 0, buffer.length);
             if (count <= 0) continue;
+            if (shouldMuteMicrophone()) continue;
             WebSocket ws = socket;
             if (ws == null || ws.queueSize() > 1_000_000) continue;
             int peak = 0;
@@ -255,9 +304,43 @@ final class LiveVoiceSession {
         while (running.get()) {
             try {
                 byte[] bytes = audioQueue.poll(250, TimeUnit.MILLISECONDS);
-                if (bytes != null) output.write(bytes, 0, bytes.length, AudioTrack.WRITE_BLOCKING);
+                if (bytes != null) {
+                    speakerWriting=true;
+                    try{
+                        int accepted=output.write(bytes, 0, bytes.length, AudioTrack.WRITE_BLOCKING);
+                        long now=SystemClock.elapsedRealtime();
+                        long duration=accepted>0?accepted*1000L/(OUTPUT_RATE*2):0;
+                        playbackExpectedEnd=Math.max(now,playbackExpectedEnd)+duration;
+                    }finally{
+                        microphoneMutedUntil=playbackExpectedEnd+700;
+                        speakerWriting=false;
+                    }
+                }
             } catch (InterruptedException ignored) { return; }
             catch (Exception ignored) { return; }
+        }
+    }
+
+    private boolean isOutputAudible(){
+        return speakerWriting || !audioQueue.isEmpty()
+                || SystemClock.elapsedRealtime()<microphoneMutedUntil;
+    }
+
+    private boolean shouldMuteMicrophone(){return !isHeadsetRoute() && isOutputAudible();}
+
+    private boolean isHeadsetRoute(){
+        AudioTrack output=speaker;
+        AudioDeviceInfo device=output==null?null:output.getRoutedDevice();
+        if(device==null)return false;
+        switch(device.getType()){
+            case AudioDeviceInfo.TYPE_WIRED_HEADSET:
+            case AudioDeviceInfo.TYPE_WIRED_HEADPHONES:
+            case AudioDeviceInfo.TYPE_USB_HEADSET:
+            case AudioDeviceInfo.TYPE_BLUETOOTH_SCO:
+            case AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:
+            case AudioDeviceInfo.TYPE_BLE_HEADSET:
+                return true;
+            default:return false;
         }
     }
 
@@ -273,6 +356,12 @@ final class LiveVoiceSession {
         audioQueue.clear();
         AudioRecord input = recorder;
         recorder = null;
+        AcousticEchoCanceler echo=echoCanceler;
+        echoCanceler=null;
+        if(echo!=null)echo.release();
+        NoiseSuppressor noise=noiseSuppressor;
+        noiseSuppressor=null;
+        if(noise!=null)noise.release();
         if (input != null) {
             try { input.stop(); } catch (Exception ignored) {}
             input.release();
