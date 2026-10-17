@@ -831,18 +831,18 @@ class HudCanvas(QWidget):
         """Position live Mac measurements on an open circular orbit."""
         values = self._radial_metrics
         nodes = (
-            (-90, "CPU", values.get("cpu", "N/A"), C.PRI),
-            (-50, "MEM", values.get("mem", "N/A"), C.ACC2),
-            (-10, "NET", values.get("net", "N/A"), C.GREEN),
-            (30, "GPU", values.get("gpu", "N/A"), C.ACC),
-            (70, "TEMP", values.get("tmp", "N/A"), "#ff6688"),
-            (110, "BATT", values.get("batt", "N/A"), C.PRI_DIM),
-            (150, "UPTIME", values.get("uptime", "N/A"), C.GREEN),
-            (190, "PROC", values.get("proc", "N/A"), C.TEXT_MED),
-            (230, "OS", values.get("os", "N/A"), C.ACC2),
+            (-90, "CPU", values.get("cpu", "N/A"), C.PRI, values.get("cpu_pct")),
+            (-50, "MEM", values.get("mem", "N/A"), C.ACC2, values.get("mem_pct")),
+            (-10, "NET", values.get("net", "N/A"), C.GREEN, values.get("net_pct")),
+            (30, "GPU", values.get("gpu", "N/A"), C.ACC, values.get("gpu_pct")),
+            (70, "TEMP", values.get("tmp", "N/A"), "#ff6688", values.get("tmp_pct")),
+            (110, "BATT", values.get("batt", "N/A"), C.PRI_DIM, values.get("batt_pct")),
+            (150, "UPTIME", values.get("uptime", "N/A"), C.GREEN, None),
+            (190, "PROC", values.get("proc", "N/A"), C.TEXT_MED, None),
+            (230, "OS", values.get("os", "N/A"), C.ACC2, None),
         )
         orbit = radius * 1.16
-        for degrees, label, value, colour in nodes:
+        for degrees, label, value, colour, progress in nodes:
             a = math.radians(degrees)
             ca, sa = math.cos(a), math.sin(a)
             dot_x, dot_y = cx + ca * radius * 1.04, cy + sa * radius * 1.04
@@ -859,6 +859,24 @@ class HudCanvas(QWidget):
             p.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
             p.drawText(QRectF(text_x - 56, text_y - 1, 112, 17),
                        Qt.AlignmentFlag.AlignCenter, value)
+            if progress is not None:
+                try:
+                    fraction = max(0.0, min(1.0, float(progress) / 100.0))
+                except (TypeError, ValueError):
+                    fraction = 0.0
+                track = QRectF(text_x - 28, text_y + 18, 56, 3)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(qcol(C.BORDER_A)))
+                p.drawRoundedRect(track, 1.5, 1.5)
+                if fraction > 0:
+                    fill_colour = C.RED if fraction > 0.85 else (
+                        C.ACC if fraction > 0.65 else colour)
+                    p.setBrush(QBrush(qcol(fill_colour)))
+                    p.drawRoundedRect(
+                        QRectF(track.x(), track.y(), max(2.0, track.width() * fraction), 3),
+                        1.5, 1.5,
+                    )
+                p.setBrush(Qt.BrushStyle.NoBrush)
 
     def paintEvent(self, _):
         p = QPainter(self)
@@ -3915,11 +3933,17 @@ class MainWindow(QMainWindow):
         os_name = {"Windows": "WIN", "Darwin": "macOS", "Linux": "LINUX"}.get(_OS, _OS.upper())
         self.hud._radial_metrics = {
             "cpu": f"{cpu:.0f}%",
+            "cpu_pct": cpu,
             "mem": f"{mem:.0f}%",
+            "mem_pct": mem,
             "net": net_str,
+            "net_pct": min(100.0, net * 10.0),  # 10 MB/s fills the indicator
             "gpu": f"{gpu:.0f}%" if gpu >= 0 else "N/A",
+            "gpu_pct": gpu if gpu >= 0 else None,
             "tmp": f"{tmp:.0f}°C" if tmp >= 0 else "N/A",
+            "tmp_pct": tmp if tmp >= 0 else None,
             "batt": f"{self.hud._battery_percent:.0f}%" if self.hud._battery_percent is not None else "N/A",
+            "batt_pct": self.hud._battery_percent,
             "uptime": uptime,
             "proc": processes,
             "os": os_name,
