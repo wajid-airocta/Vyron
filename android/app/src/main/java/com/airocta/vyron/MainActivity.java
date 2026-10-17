@@ -24,12 +24,11 @@ import android.webkit.ValueCallback;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
+import android.view.View;
 import java.io.InputStream;
-import java.net.HttpURLConnection;
-import javax.net.ssl.HttpsURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
@@ -38,6 +37,14 @@ import org.json.JSONObject;
 
 public final class MainActivity extends Activity {
     private WebView web;
+    private LinearLayout remotePanel;
+    private LinearLayout chatPanel;
+    private LinearLayout messages;
+    private ScrollView chatScroll;
+    private EditText promptInput;
+    private Button sendButton;
+    private TextView keyStatus;
+    private final JSONArray conversation = new JSONArray();
     private EditText urlInput;
     private TextView status;
     private String allowedHost;
@@ -70,8 +77,49 @@ public final class MainActivity extends Activity {
         top.addView(title,new LinearLayout.LayoutParams(0,-2,1));
         Button api=button("API");
         api.setOnClickListener(v->showApiSettings());
+        Button chat=button("CHAT");
+        chat.setOnClickListener(v->showMode(false));
+        top.addView(chat);
+        Button remote=button("MAC");
+        remote.setOnClickListener(v->showMode(true));
+        top.addView(remote);
         top.addView(api);
         root.addView(top);
+        chatPanel=new LinearLayout(this);
+        chatPanel.setOrientation(LinearLayout.VERTICAL);
+        TextView introduction=new TextView(this);
+        introduction.setText("VYRON  •  Phone assistant\nAsk a question below. Mac control is available in the MAC tab.");
+        introduction.setTextColor(Color.rgb(126,225,226));
+        introduction.setTextSize(16);
+        introduction.setPadding(20,24,20,18);
+        chatPanel.addView(introduction);
+        keyStatus=new TextView(this);
+        keyStatus.setTextColor(Color.rgb(91,200,143));
+        keyStatus.setTextSize(13);
+        keyStatus.setPadding(20,0,20,12);
+        chatPanel.addView(keyStatus);
+        updateKeyStatus();
+        chatScroll=new ScrollView(this);
+        messages=new LinearLayout(this);
+        messages.setOrientation(LinearLayout.VERTICAL);
+        messages.setPadding(16,8,16,8);
+        chatScroll.addView(messages);
+        chatPanel.addView(chatScroll,new LinearLayout.LayoutParams(-1,0,1));
+        LinearLayout composer=new LinearLayout(this);
+        composer.setPadding(8,8,8,12);
+        promptInput=new EditText(this);
+        promptInput.setHint("Ask VYRON…");
+        promptInput.setTextColor(Color.WHITE);
+        promptInput.setHintTextColor(Color.rgb(143,179,185));
+        promptInput.setMaxLines(4);
+        composer.addView(promptInput,new LinearLayout.LayoutParams(0,-2,1));
+        sendButton=button("SEND");
+        sendButton.setOnClickListener(v->sendChat());
+        composer.addView(sendButton);
+        chatPanel.addView(composer);
+        root.addView(chatPanel,new LinearLayout.LayoutParams(-1,0,1));
+        remotePanel=new LinearLayout(this);
+        remotePanel.setOrientation(LinearLayout.VERTICAL);
         LinearLayout connect=new LinearLayout(this);
         connect.setPadding(8,4,8,4);
         urlInput=new EditText(this);
@@ -85,13 +133,13 @@ public final class MainActivity extends Activity {
         Button go=button("CONNECT");
         go.setOnClickListener(v->connect());
         connect.addView(go);
-        root.addView(connect);
+        remotePanel.addView(connect);
         status=new TextView(this);
         status.setTextColor(Color.rgb(134,206,214));
         status.setTextSize(12);
         status.setPadding(13,2,13,4);
         status.setText("Connect to the HTTPS address shown by VYRON on your Mac.");
-        root.addView(status);
+        remotePanel.addView(status);
         web=new WebView(this);
         web.setBackgroundColor(Color.rgb(2,7,10));
         web.getSettings().setJavaScriptEnabled(true);
@@ -150,9 +198,10 @@ public final class MainActivity extends Activity {
                 }
             }
         });
-        root.addView(web,new LinearLayout.LayoutParams(-1,0,1));
+        remotePanel.addView(web,new LinearLayout.LayoutParams(-1,0,1));
+        root.addView(remotePanel,new LinearLayout.LayoutParams(-1,0,1));
         setContentView(root);
-        if(!urlInput.getText().toString().isBlank()) connect();
+        showMode(false);
         if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)!=PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION},10);
     }
@@ -163,6 +212,60 @@ public final class MainActivity extends Activity {
         b.setTextColor(Color.rgb(218,247,248));
         b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(30,70,81)));
         return b;
+    }
+    private void showMode(boolean remote) {
+        chatPanel.setVisibility(remote ? View.GONE : View.VISIBLE);
+        remotePanel.setVisibility(remote ? View.VISIBLE : View.GONE);
+        if (remote && web.getUrl() == null && !urlInput.getText().toString().trim().isEmpty()) connect();
+    }
+    private String activeKey() {
+        String override=SecretStore.load(this);
+        return override == null || override.trim().isEmpty() ? BuildConfig.STARTER_GEMINI_API_KEY : override;
+    }
+    private void updateKeyStatus() {
+        if(SecretStore.load(this)!=null) keyStatus.setText("GEMINI · PERSONAL KEY");
+        else if(!BuildConfig.STARTER_GEMINI_API_KEY.trim().isEmpty()) keyStatus.setText("GEMINI · TEST STARTER READY");
+        else keyStatus.setText("GEMINI · ADD A KEY IN API SETTINGS");
+    }
+    private void addMessage(String speaker,String value) {
+        TextView item=new TextView(this);
+        item.setText(speaker+"\n"+value);
+        item.setTextColor(Color.rgb(218,247,248));
+        item.setTextSize(17);
+        item.setPadding(14,12,14,16);
+        messages.addView(item,new LinearLayout.LayoutParams(-1,-2));
+        chatScroll.post(()->chatScroll.fullScroll(View.FOCUS_DOWN));
+    }
+    private void sendChat() {
+        String prompt=promptInput.getText().toString().trim();
+        if(prompt.isEmpty())return;
+        String key=activeKey();
+        if(key==null || key.trim().isEmpty()){
+            showApiSettings();
+            return;
+        }
+        promptInput.setText("");
+        addMessage("YOU",prompt);
+        sendButton.setEnabled(false);
+        try {
+            conversation.put(GeminiClient.turn("user",prompt));
+        } catch(Exception ignored) {}
+        JSONArray history=new JSONArray();
+        int start=Math.max(0,conversation.length()-12);
+        for(int i=start;i<conversation.length();i++)history.put(conversation.opt(i));
+        new Thread(()->{
+            String answer=GeminiClient.ask(key,history);
+            runOnUiThread(()->{
+                addMessage("VYRON",answer);
+                boolean failed=answer.startsWith("Gemini error:")
+                        || answer.startsWith("Gemini is unavailable")
+                        || answer.startsWith("Gemini returned");
+                if(failed) conversation.remove(conversation.length()-1);
+                else
+                    try {conversation.put(GeminiClient.turn("model",answer));}catch(Exception ignored){}
+                sendButton.setEnabled(true);
+            });
+        },"vyron-phone-chat").start();
     }
     private void connect() {
         String value=urlInput.getText().toString().trim().replaceAll("/+$","");
@@ -178,19 +281,27 @@ public final class MainActivity extends Activity {
     private void showApiSettings() {
         EditText field=new EditText(this);
         field.setSingleLine(true);
-        field.setHint("Optional Gemini API key");
+        field.setHint("Paste your Gemini API key");
         field.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
         field.setPadding(24,16,24,16);
-        new AlertDialog.Builder(this).setTitle("VYRON API source")
-                .setMessage("With no override, VYRON uses the Gemini key on your paired Mac. An override stays encrypted on this phone.")
+        String source=SecretStore.load(this)!=null ? "Your encrypted phone override is active."
+                : BuildConfig.STARTER_GEMINI_API_KEY.trim().isEmpty() ? "No starter key is included in this build."
+                : "The local test starter key is active.";
+        new AlertDialog.Builder(this).setTitle("Gemini API key")
+                .setMessage(source+" Enter a key to override it on this phone. MAC mode uses the paired Mac unless an override is saved.")
                 .setView(field)
                 .setPositiveButton("SAVE OVERRIDE",(d,w)->{
-                    try { SecretStore.save(this,field.getText().toString().trim()); status.setText("API source updated."); }
-                    catch(Exception e){status.setText("Could not save the override securely.");}
+                    String value=field.getText().toString().trim();
+                    if(value.isEmpty()){
+                        Toast.makeText(this,"Enter a key or choose USE STARTER.",Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    try { SecretStore.save(this,value); updateKeyStatus(); Toast.makeText(this,"Phone API override saved.",Toast.LENGTH_SHORT).show(); }
+                    catch(Exception e){Toast.makeText(this,"Could not save the key securely.",Toast.LENGTH_LONG).show();}
                 })
-                .setNeutralButton("USE MAC KEY",(d,w)->{
-                    try { SecretStore.save(this,null); status.setText("Using the Mac's Gemini key."); }
-                    catch(Exception e){status.setText("Could not clear the override.");}
+                .setNeutralButton("USE STARTER",(d,w)->{
+                    try { SecretStore.save(this,null); updateKeyStatus(); Toast.makeText(this,"Using the starter key in CHAT mode.",Toast.LENGTH_SHORT).show(); }
+                    catch(Exception e){Toast.makeText(this,"Could not clear the override.",Toast.LENGTH_LONG).show();}
                 })
                 .setNegativeButton("CANCEL",null).show();
     }
@@ -224,7 +335,7 @@ public final class MainActivity extends Activity {
                 manager.requestSingleUpdate(LocationManager.NETWORK_PROVIDER,location->{},android.os.Looper.getMainLooper());
         }catch(Exception ignored){}
     }
-    @Override public void onBackPressed() { if(web.canGoBack())web.goBack();else super.onBackPressed(); }
+    @Override public void onBackPressed() { if(remotePanel.getVisibility()==View.VISIBLE && web.canGoBack())web.goBack();else super.onBackPressed(); }
     @Override protected void onDestroy(){web.destroy();super.onDestroy();}
 
     private final class Bridge {
@@ -232,32 +343,11 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void openSettings(){runOnUiThread(()->showApiSettings());}
         @JavascriptInterface public void sendOverride(String prompt){
             String key=SecretStore.load(MainActivity.this);
-            if(key==null || key.isBlank()){reply("No override key saved. Use the Mac key or add one in API settings.");return;}
+            if(key==null || key.trim().isEmpty()){reply("No override key saved. Use the Mac key or add one in API settings.");return;}
             new Thread(()->{
                 String answer;
                 try {
-                    URL url=new URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent");
-                    HttpsURLConnection c=(HttpsURLConnection)url.openConnection();
-                    c.setConnectTimeout(10000);c.setReadTimeout(30000);c.setRequestMethod("POST");c.setDoOutput(true);
-                    c.setRequestProperty("Content-Type","application/json");
-                    c.setRequestProperty("x-goog-api-key",key);
-                    JSONObject body=new JSONObject().put("contents",new JSONArray().put(
-                            new JSONObject().put("parts",new JSONArray().put(new JSONObject().put("text",prompt)))));
-                    try(java.io.OutputStream out=c.getOutputStream()){out.write(body.toString().getBytes(StandardCharsets.UTF_8));}
-                    InputStream in=c.getResponseCode()<400?c.getInputStream():c.getErrorStream();
-                    byte[] data=readLimited(in);
-                    JSONObject response=new JSONObject(new String(data,StandardCharsets.UTF_8));
-                    if(c.getResponseCode()>=400) {
-                        JSONObject detail=response.optJSONObject("error");
-                        answer="Gemini request failed: "+(detail==null?"HTTP "+c.getResponseCode():detail.optString("message","HTTP "+c.getResponseCode()));
-                    }
-                    else {
-                        JSONArray parts=response.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts");
-                        StringBuilder text=new StringBuilder();
-                        for(int i=0;i<parts.length();i++)text.append(parts.getJSONObject(i).optString("text"));
-                        answer=text.toString();
-                    }
-                    c.disconnect();
+                    answer=GeminiClient.ask(key,new JSONArray().put(GeminiClient.turn("user",prompt)));
                 } catch(Exception e){answer="Gemini is unavailable. Check your connection and override key.";}
                 reply(answer);
             },"vyron-gemini").start();
@@ -265,13 +355,5 @@ public final class MainActivity extends Activity {
         private void reply(String answer){
             runOnUiThread(()->web.evaluateJavascript("window.vyronOverrideResult("+JSONObject.quote(answer)+")",null));
         }
-    }
-    private static byte[] readLimited(InputStream in) throws Exception {
-        java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();
-        byte[] buffer=new byte[8192];
-        int n;
-        while((n=in.read(buffer))!=-1 && out.size()<1024*1024)
-            out.write(buffer,0,Math.min(n,1024*1024-out.size()));
-        return out.toByteArray();
     }
 }

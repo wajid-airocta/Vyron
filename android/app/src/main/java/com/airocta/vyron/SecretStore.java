@@ -17,7 +17,7 @@ final class SecretStore {
     private SecretStore() {}
 
     static void save(Context context, String value) throws Exception {
-        if (value == null || value.isBlank()) {
+        if (value == null || value.trim().isEmpty()) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove("key").apply();
             return;
         }
