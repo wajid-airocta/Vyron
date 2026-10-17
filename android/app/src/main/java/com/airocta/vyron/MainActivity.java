@@ -30,6 +30,9 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.view.View;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
+import android.view.WindowManager;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.security.cert.CertificateFactory;
@@ -39,6 +42,7 @@ import org.json.JSONObject;
 
 public final class MainActivity extends Activity {
     private WebView web;
+    private LinearLayout root;
     private LinearLayout remotePanel;
     private LinearLayout chatPanel;
     private LinearLayout systemPanel;
@@ -76,15 +80,18 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         getWindow().setStatusBarColor(Color.rgb(2,7,10));
         getWindow().setNavigationBarColor(Color.rgb(2,7,10));
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         try (InputStream in=getResources().openRawResource(R.raw.vyron_mac)) {
             X509Certificate cert=(X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(in);
             pinnedHash=MessageDigest.getInstance("SHA-256").digest(cert.getEncoded());
         } catch (Exception error) {
             pinnedHash=new byte[0];
         }
-        LinearLayout root=new LinearLayout(this);
+        root=new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.BLACK);
+        root.setFocusableInTouchMode(true);
         LinearLayout top=new LinearLayout(this);
         top.setPadding(16,8,12,2);
         top.setGravity(android.view.Gravity.CENTER_VERTICAL);
@@ -153,6 +160,11 @@ public final class MainActivity extends Activity {
         promptInput.setTextColor(Color.WHITE);
         promptInput.setHintTextColor(Color.rgb(143,179,185));
         promptInput.setSingleLine(true);
+        promptInput.setImeOptions(EditorInfo.IME_ACTION_SEND);
+        promptInput.setOnEditorActionListener((view,action,event)->{
+            if(action==EditorInfo.IME_ACTION_SEND){sendChat();return true;}
+            return false;
+        });
         composer.addView(promptInput,new LinearLayout.LayoutParams(0,-2,1));
         sendButton=button("SEND");
         sendButton.setOnClickListener(v->sendChat());
@@ -197,6 +209,11 @@ public final class MainActivity extends Activity {
         urlInput.setTextColor(Color.WHITE);
         urlInput.setHintTextColor(Color.rgb(149,180,187));
         urlInput.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);
+        urlInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        urlInput.setOnEditorActionListener((view,action,event)->{
+            if(action==EditorInfo.IME_ACTION_DONE){connect();return true;}
+            return false;
+        });
         urlInput.setText(getPreferences(0).getString("url",""));
         connect.addView(urlInput,new LinearLayout.LayoutParams(0,-2,1));
         Button go=button("CONNECT");
@@ -286,6 +303,7 @@ public final class MainActivity extends Activity {
         }
         root.addView(navigation);
         setContentView(root);
+        root.requestFocus();
         showMode(0);
         systemHandler.post(refreshSystem);
         if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)!=PackageManager.PERMISSION_GRANTED)
@@ -302,7 +320,17 @@ public final class MainActivity extends Activity {
         return b;
     }
     private int dp(int value) { return (int)(value*getResources().getDisplayMetrics().density+.5f); }
+    private void hideKeyboard(){
+        View focused=getCurrentFocus();
+        if(focused!=null){
+            InputMethodManager keyboard=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+            if(keyboard!=null)keyboard.hideSoftInputFromWindow(focused.getWindowToken(),0);
+            focused.clearFocus();
+        }
+        if(root!=null)root.requestFocus();
+    }
     private void openSection(int section){
+        hideKeyboard();
         if(section==4){showApiSettings();return;}
         showMode(section==3?2:section==1?1:0);
         if(section==3)return;
@@ -324,6 +352,7 @@ public final class MainActivity extends Activity {
         }
     }
     private void showMode(int mode) {
+        hideKeyboard();
         if(mode==2) stopVoice();
         chatPanel.setVisibility(mode==0 ? View.VISIBLE : View.GONE);
         systemPanel.setVisibility(mode==1 ? View.VISIBLE : View.GONE);
@@ -417,6 +446,7 @@ public final class MainActivity extends Activity {
         chatScroll.post(()->chatScroll.fullScroll(View.FOCUS_DOWN));
     }
     private void toggleVoice() {
+        hideKeyboard();
         if(liveSession!=null){stopVoice();return;}
         if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},13);
@@ -449,6 +479,9 @@ public final class MainActivity extends Activity {
                     @Override public void onLevel(float level){runOnUiThread(()->{
                         if(liveSession==current[0])reactor.setMicLevel(level);
                     });}
+                    @Override public void onOutputLevel(float level){runOnUiThread(()->{
+                        if(liveSession==current[0])reactor.setOutputLevel(level);
+                    });}
                     @Override public void onStopped(String message){runOnUiThread(()->{
                         if(liveSession!=current[0])return;
                         stopVoice();
@@ -467,11 +500,13 @@ public final class MainActivity extends Activity {
         if(old!=null)old.stop();
         stopService(new Intent(this,VoiceKeeperService.class));
         if(reactor!=null)reactor.setState("READY");
+        if(reactor!=null){reactor.setMicLevel(0);reactor.setOutputLevel(0);}
         if(voiceStatus!=null)voiceStatus.setText("READY  ·  TAP TO SPEAK");
         if(voiceButton!=null)voiceButton.setText("●  START VOICE");
     }
     private void sendChat() {
         String prompt=promptInput.getText().toString().trim();
+        hideKeyboard();
         if(prompt.isEmpty())return;
         String key=activeKey();
         if(key==null || key.trim().isEmpty()){
@@ -506,6 +541,7 @@ public final class MainActivity extends Activity {
         },"vyron-phone-chat").start();
     }
     private void connect() {
+        hideKeyboard();
         String value=urlInput.getText().toString().trim().replaceAll("/+$","");
         Uri uri=Uri.parse(value);
         if(!"https".equals(uri.getScheme()) || uri.getHost()==null || uri.getPort()<1) {
@@ -517,6 +553,7 @@ public final class MainActivity extends Activity {
         web.loadUrl(value);
     }
     private void showApiSettings() {
+        hideKeyboard();
         LinearLayout form=new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(20),0,dp(20),0);

@@ -27,17 +27,19 @@ final class ReactorView extends View {
     private boolean sampling;
     private String state = "READY";
     private float micLevel;
+    private float outputLevel;
+    private float displayedLevel;
     private long lastSample;
 
     ReactorView(Context context) {
         super(context);
         appContext = context.getApplicationContext();
-        setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         sample();
     }
 
     void setState(String next) { state = next; invalidate(); }
-    void setMicLevel(float level) { micLevel = micLevel * .72f + level * .28f; invalidate(); }
+    void setMicLevel(float level) { micLevel = Math.max(0, Math.min(1, level)); invalidate(); }
+    void setOutputLevel(float level) { outputLevel = Math.max(0, Math.min(1, level)); invalidate(); }
 
     private void sample() {
         if (sampling) return;
@@ -59,7 +61,12 @@ final class ReactorView extends View {
         float radius = Math.min(width * .30f, height * .30f);
         float labelRadius = radius + 35 * density;
         long age = SystemClock.uptimeMillis() - started;
-        float spin = (age % 60000) * 360f / 60000f;
+        boolean speaking = "SPEAKING".equals(state);
+        boolean thinking = "THINKING".equals(state) || "PROCESSING".equals(state);
+        float activity = speaking ? outputLevel : micLevel;
+        displayedLevel += (activity - displayedLevel) * (activity > displayedLevel ? .36f : .16f);
+        float seconds = age / 1000f;
+        float speed = speaking ? 1.8f : thinking ? 1.5f : 1f;
         JSONObject data = readings;
         canvas.drawColor(Color.BLACK);
         stars.setSeed(1494);
@@ -79,7 +86,7 @@ final class ReactorView extends View {
             canvas.drawCircle(cx, cy, r, paint);
         }
         for (int i = 0; i < 72; i++) {
-            float a = (float) Math.toRadians(i * 5 + spin * .08f);
+            float a = (float) Math.toRadians(i * 5);
             float inner = radius - ((i % 6 == 0) ? 9 : 4) * density;
             paint.setColor(i % 6 == 0 ? CYAN : BLUE);
             paint.setStrokeWidth(i % 6 == 0 ? 1.2f * density : .7f * density);
@@ -109,15 +116,27 @@ final class ReactorView extends View {
                 Color.rgb(255,93,153), 55, 29, 3 * density);
         drawProgress(canvas, cx, cy, radius + 7 * density, battery, BLUE, 92, 29, 3 * density);
         drawProgress(canvas, cx, cy, radius * .57f, storage, GREEN, 0, 360, 2.5f * density);
-        paint.setColor(Color.rgb(0, 157, 178));
-        paint.setStrokeWidth(1.6f * density);
-        RectF inner = new RectF(cx - radius * .51f, cy - radius * .51f,
-                cx + radius * .51f, cy + radius * .51f);
-        canvas.drawArc(inner, spin - 90, 85, false, paint);
-        canvas.drawArc(inner, spin + 100, 70, false, paint);
-        paint.setColor(Color.argb(75, 0, 154, 174));
+        // The Mac HUD uses independent, alternating shells. Voice quickens them.
+        drawOrbit(canvas,cx,cy,radius*.94f,seconds*36f*speed,2,118,CYAN,1.9f*density);
+        drawOrbit(canvas,cx,cy,radius*.84f,-seconds*48f*speed,3,82,BLUE,1.5f*density);
+        drawOrbit(canvas,cx,cy,radius*.75f,seconds*65f*speed,1,150,GREEN,1.5f*density);
+        drawOrbit(canvas,cx,cy,radius*.64f,-seconds*78f*speed,4,64,CYAN,1.2f*density);
+        drawOrbit(canvas,cx,cy,radius*.54f,seconds*94f*speed,2,128,BLUE,1.2f*density);
+        float spectrumRadius = radius * .42f;
+        for (int i=0;i<60;i++) {
+            float angle=(float)(i*Math.PI*2/60);
+            float wobble=.55f+.45f*(float)Math.sin(seconds*6+i*.42f);
+            float spike=radius*(.015f+displayedLevel*.20f*wobble);
+            float x=(float)Math.cos(angle), y=(float)Math.sin(angle);
+            paint.setColor(speaking ? CYAN : GREEN);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(1.3f*density);
+            canvas.drawLine(cx+x*spectrumRadius,cy+y*spectrumRadius,
+                    cx+x*(spectrumRadius+spike),cy+y*(spectrumRadius+spike),paint);
+        }
+        paint.setColor(Color.argb(55+(int)(110*displayedLevel),0,188,205));
         paint.setStyle(Paint.Style.FILL);
-        canvas.drawCircle(cx, cy, radius * .39f + micLevel * 5 * density, paint);
+        canvas.drawCircle(cx, cy, radius * (.38f + displayedLevel*.055f), paint);
         paint.setColor(Color.BLACK);
         canvas.drawCircle(cx, cy, radius * .35f, paint);
         String storageText = Float.isNaN(available) ? "N/A" :
@@ -126,7 +145,8 @@ final class ReactorView extends View {
         drawText(canvas, storageText, cx, cy - 2 * density,
                 Math.min(19 * density, radius * .18f), Color.rgb(188,234,238), true);
         drawText(canvas, "SPACE FREE", cx, cy + 15 * density, 8 * density, CYAN, true);
-        drawText(canvas, state, cx, cy + 29 * density, 8 * density, GREEN, true);
+        drawText(canvas, state, cx, cy + 29 * density, 8 * density,
+                speaking ? CYAN : GREEN, true);
 
         drawMetric(canvas, cx, cy, labelRadius, -90, appCpu ? "APP CPU" : "CPU",
                 Float.isNaN(cpu) ? "N/A" : Math.round(cpu * 100) + "%", CYAN, density);
@@ -147,7 +167,18 @@ final class ReactorView extends View {
                 visible == null ? "N/A" : visible.length() + " VIS", CYAN, density);
         drawMetric(canvas, cx, cy, labelRadius, 230, "OS",
                 "Android " + data.optString("android_version", "?"), Color.rgb(255,193,0), density);
-        postInvalidateDelayed(70);
+        postInvalidateDelayed(33);
+    }
+
+    private void drawOrbit(Canvas canvas,float cx,float cy,float radius,float start,
+                           int count,float sweep,int color,float width){
+        RectF bounds=new RectF(cx-radius,cy-radius,cx+radius,cy+radius);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        paint.setStrokeWidth(width);
+        paint.setColor(color);
+        for(int i=0;i<count;i++)
+            canvas.drawArc(bounds,start+i*360f/count,sweep,false,paint);
     }
 
     private void drawProgress(Canvas canvas, float cx, float cy, float radius, float progress,

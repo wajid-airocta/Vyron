@@ -34,6 +34,7 @@ final class LiveVoiceSession {
         void onState(String state);
         void onTranscript(boolean user, String text);
         void onLevel(float level);
+        void onOutputLevel(float level);
         void onStopped(String message);
     }
 
@@ -62,6 +63,7 @@ final class LiveVoiceSession {
     private volatile boolean speakerWriting;
     private volatile long microphoneMutedUntil;
     private volatile boolean ready;
+    private volatile boolean responseComplete;
     private volatile String apiKey;
     private volatile String resumeHandle = "";
     private volatile int reconnects;
@@ -162,6 +164,8 @@ final class LiveVoiceSession {
                     if (content == null) return;
                     if (content.optBoolean("interrupted")) {
                         audioQueue.clear();
+                        responseComplete = false;
+                        listener.onOutputLevel(0);
                         AudioTrack track = speaker;
                         if (track != null) {
                             track.pause();
@@ -193,13 +197,16 @@ final class LiveVoiceSession {
                                 audioQueue.poll();
                                 audioQueue.offer(pcm);
                             }
+                            responseComplete = false;
                             listener.onState("SPEAKING");
                         }
                     }
                     if (content.optBoolean("turnComplete")) {
                         reconnects=0;
                         completedTurn = true;
-                        listener.onState("LISTENING");
+                        responseComplete = true;
+                        if (audioQueue.isEmpty() && !speakerWriting)
+                            listener.onState("LISTENING");
                     }
                 } catch (Exception ignored) { /* Ignore malformed non-audio event. */ }
             }
@@ -240,6 +247,7 @@ final class LiveVoiceSession {
         socket=null;
         ready=false;
         audioQueue.clear();
+        responseComplete = false;
         failed.cancel();
         int attempt=++reconnects;
         if(attempt>MAX_RECONNECTS){fail(finalMessage);return;}
@@ -278,6 +286,12 @@ final class LiveVoiceSession {
             AudioRecord input = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                     INPUT_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
                     Math.max(minInput, 6400));
+            if (input.getState() != AudioRecord.STATE_INITIALIZED) {
+                input.release();
+                input = new AudioRecord(MediaRecorder.AudioSource.MIC,
+                        INPUT_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                        Math.max(minInput, 6400));
+            }
             AudioTrack output = new AudioTrack.Builder()
                     .setAudioAttributes(new AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_ASSISTANT)
@@ -310,7 +324,12 @@ final class LiveVoiceSession {
                     AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
             output.play();
             input.startRecording();
-            captureThread = new Thread(() -> capture(input), "vyron-live-microphone");
+            if (input.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                fail("The microphone did not start. Check Android microphone access and reopen voice.");
+                return;
+            }
+            final AudioRecord activeInput=input;
+            captureThread = new Thread(() -> capture(activeInput), "vyron-live-microphone");
             playbackThread = new Thread(() -> playback(output), "vyron-live-speaker");
             captureThread.start();
             playbackThread.start();
@@ -319,24 +338,16 @@ final class LiveVoiceSession {
 
     private void capture(AudioRecord input) {
         byte[] buffer = new byte[3200]; // 100 ms of 16 kHz mono PCM16
-        long pausedAt=0;
-        boolean pauseSignaled=false;
         while (running.get()) {
             int count = input.read(buffer, 0, buffer.length);
             if(count<0){fail("The microphone stopped. Reopen voice after checking the audio device.");return;}
             if(count==0)continue;
             WebSocket ws = socket;
-            if (ws == null || !ready) { pausedAt=0;pauseSignaled=false;continue; }
+            if (ws == null || !ready) continue;
             if(shouldMuteMicrophone()){
-                if(pausedAt==0)pausedAt=SystemClock.elapsedRealtime();
-                if(!pauseSignaled && SystemClock.elapsedRealtime()-pausedAt>1000){
-                    ws.send("{\"realtimeInput\":{\"audioStreamEnd\":true}}");
-                    pauseSignaled=true;
-                }
+                listener.onLevel(0);
                 continue;
             }
-            pausedAt=0;
-            pauseSignaled=false;
             if (ws.queueSize() > 1_000_000) continue;
             int peak = 0;
             for (int i = 0; i + 1 < count; i += 2) {
@@ -361,13 +372,25 @@ final class LiveVoiceSession {
                 if (bytes != null) {
                     speakerWriting=true;
                     try{
-                        int accepted=output.write(bytes, 0, bytes.length, AudioTrack.WRITE_BLOCKING);
-                        if(accepted<0)throw new IllegalStateException("Audio output failed");
+                        listener.onOutputLevel(pcmLevel(bytes));
+                        int offset=0;
+                        while (offset<bytes.length && running.get()) {
+                            int accepted=output.write(bytes, offset, bytes.length-offset,
+                                    AudioTrack.WRITE_BLOCKING);
+                            if(accepted<=0)throw new IllegalStateException("Audio output failed");
+                            offset+=accepted;
+                        }
                         long now=SystemClock.elapsedRealtime();
-                        long duration=accepted>0?accepted*1000L/(OUTPUT_RATE*2):0;
-                        microphoneMutedUntil=now+duration+700;
+                        long duration=offset*1000L/(OUTPUT_RATE*2);
+                        microphoneMutedUntil=Math.max(now,microphoneMutedUntil)+duration;
                     }finally{
                         speakerWriting=false;
+                    }
+                } else {
+                    listener.onOutputLevel(0);
+                    if (responseComplete && SystemClock.elapsedRealtime()>microphoneMutedUntil) {
+                        responseComplete=false;
+                        listener.onState("LISTENING");
                     }
                 }
             } catch (InterruptedException ignored) { return; }
@@ -377,6 +400,13 @@ final class LiveVoiceSession {
                 return;
             }
         }
+    }
+
+    private static float pcmLevel(byte[] bytes) {
+        int peak=0;
+        for(int i=0;i+1<bytes.length;i+=2)
+            peak=Math.max(peak,Math.abs((short)((bytes[i]&255)|(bytes[i+1]<<8))));
+        return Math.min(1f,peak/11000f);
     }
 
     private boolean isOutputAudible(){

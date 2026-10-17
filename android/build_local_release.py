@@ -79,7 +79,7 @@ def main() -> int:
     if not source.is_file():
         print("Signed release APK was not produced.", file=sys.stderr)
         return 3
-    destination = ROOT / "dist/Vyron-Android-1.2.1.apk"
+    destination = ROOT / "dist/Vyron-Android-1.2.2.apk"
     destination.parent.mkdir(exist_ok=True)
     shutil.copy2(source, destination)
     destination.chmod(0o600)

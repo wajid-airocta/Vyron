@@ -8,7 +8,7 @@ Settings stores a preferred name for natural voice greetings and a personal Gemi
 
 ## Private installable APK
 
-Run `python3 build_local_release.py` on this Mac. It reads the working key from `~/Library/Application Support/Vyron/config/api_keys.json`, creates a local release signing key on the first run, and produces the signed `dist/Vyron-Android-1.2.1.apk`. This APK includes the starter Gemini key and can be transferred to another Android phone. The Settings screen on that phone can override the starter key. The included Gradle wrapper and installed Android SDK platform 35 handle the build.
+Run `python3 build_local_release.py` on this Mac. It reads the working key from `~/Library/Application Support/Vyron/config/api_keys.json`, creates a local release signing key on the first run, and produces the signed `dist/Vyron-Android-1.2.2.apk`. This APK includes the starter Gemini key and can be transferred to another Android phone. The Settings screen on that phone can override the starter key. The included Gradle wrapper and installed Android SDK platform 35 handle the build.
 
 ## Phone tools and permissions
 
